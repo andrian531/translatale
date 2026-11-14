@@ -8,8 +8,17 @@ const apiOnline = ref(null)
 
 const nav = [
   { to: '/library', label: 'Library' },
+  { to: '/scrapers', label: 'Scrapers' },
   { to: '/settings', label: 'Settings' },
 ]
+
+function isActive(item) {
+  // The workspace lives under /novels/:id but belongs to the Library section.
+  if (item.to === '/library') {
+    return route.path === '/library' || route.path.startsWith('/novels')
+  }
+  return route.path === item.to
+}
 
 onMounted(async () => {
   try {
@@ -40,7 +49,7 @@ onMounted(async () => {
             :to="item.to"
             class="rounded-lg px-3 py-1.5 text-sm font-medium transition-colors"
             :class="
-              route.path === item.to
+              isActive(item)
                 ? 'bg-ink-800 text-white'
                 : 'text-slate-400 hover:bg-ink-850 hover:text-slate-200'
             "

@@ -33,6 +33,38 @@ CREATE TABLE IF NOT EXISTS task_models (
     max_tokens  INTEGER NOT NULL DEFAULT 4096,
     updated_at  TEXT    NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS novels (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    title            TEXT    NOT NULL,
+    title_translated TEXT    NOT NULL DEFAULT '',
+    author           TEXT    NOT NULL DEFAULT '',
+    source_lang      TEXT    NOT NULL DEFAULT 'zh',
+    target_lang      TEXT    NOT NULL DEFAULT 'id',
+    source_type      TEXT    NOT NULL DEFAULT 'manual',
+    source_url       TEXT    NOT NULL DEFAULT '',
+    scraper_name     TEXT    NOT NULL DEFAULT '',
+    synopsis         TEXT    NOT NULL DEFAULT '',
+    created_at       TEXT    NOT NULL,
+    updated_at       TEXT    NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS chapters (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    novel_id           INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+    chapter_number     REAL    NOT NULL DEFAULT 0,
+    title              TEXT    NOT NULL DEFAULT '',
+    title_translated   TEXT    NOT NULL DEFAULT '',
+    source_url         TEXT    NOT NULL DEFAULT '',
+    raw_content        TEXT    NOT NULL DEFAULT '',
+    translated_content TEXT    NOT NULL DEFAULT '',
+    status             TEXT    NOT NULL DEFAULT 'pending_fetch',
+    quality_score      REAL,
+    created_at         TEXT    NOT NULL,
+    updated_at         TEXT    NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_chapters_novel ON chapters(novel_id, chapter_number);
 """
 
 

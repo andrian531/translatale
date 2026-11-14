@@ -1,6 +1,8 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import LibraryView from '@/views/LibraryView.vue'
+import ScrapersView from '@/views/ScrapersView.vue'
 import SettingsView from '@/views/SettingsView.vue'
+import WorkspaceView from '@/views/WorkspaceView.vue'
 
 const routes = [
   { path: '/', redirect: '/library' },
@@ -9,6 +11,18 @@ const routes = [
     name: 'library',
     component: LibraryView,
     meta: { title: 'Library' },
+  },
+  {
+    path: '/novels/:id',
+    name: 'workspace',
+    component: WorkspaceView,
+    meta: { title: 'Workspace' },
+  },
+  {
+    path: '/scrapers',
+    name: 'scrapers',
+    component: ScrapersView,
+    meta: { title: 'Scrapers' },
   },
   {
     path: '/settings',

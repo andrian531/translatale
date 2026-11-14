@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 import config
 import database
-from routers import settings
+from routers import projects, scrapers, settings
 
 __version__ = "0.1.0"
 
@@ -44,6 +44,8 @@ app.add_middleware(
 )
 
 app.include_router(settings.router)
+app.include_router(projects.router)
+app.include_router(scrapers.router)
 
 
 @app.get("/api/health")
