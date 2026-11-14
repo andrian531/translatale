@@ -147,6 +147,10 @@ function openWorkspace(novel) {
   router.push(`/novels/${novel.id}`)
 }
 
+function openReader(novel) {
+  router.push(`/novels/${novel.id}/read`)
+}
+
 onMounted(load)
 </script>
 
@@ -237,9 +241,21 @@ onMounted(load)
           </span>
         </div>
 
-        <div class="mt-auto flex items-center gap-2 pt-1">
+        <div class="mt-auto flex flex-wrap items-center gap-2 pt-1">
+          <button
+            class="btn-primary !px-2.5 !py-1 text-xs"
+            :disabled="!novel.translated_count"
+            :title="
+              novel.translated_count
+                ? 'Buka reader'
+                : 'Belum ada bab terjemahan'
+            "
+            @click="openReader(novel)"
+          >
+            {{ novel.last_read_chapter_id ? 'Lanjut Baca' : 'Baca' }}
+          </button>
           <button class="btn-ghost !px-2.5 !py-1 text-xs" @click="openWorkspace(novel)">
-            Buka workspace →
+            Workspace
           </button>
           <button
             class="btn-danger ml-auto !px-2.5 !py-1 text-xs"

@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { novelsApi } from '@/api/novels'
+import { readerApi } from '@/api/reader'
 import { translationApi } from '@/api/translation'
 
 const route = useRoute()
@@ -350,6 +351,39 @@ function openChapter(chapter) {
   editPane.value = 'both'
 }
 
+function openReader(chapterId) {
+  const suffix = chapterId ? `/${chapterId}` : ''
+  router.push(`/novels/${novelId.value}/read${suffix}`)
+}
+
+async function downloadExport(format) {
+  try {
+    const response = await fetch(readerApi.exportUrl(novelId.value, format))
+    if (!response.ok) {
+      let detail = `${response.status} ${response.statusText}`
+      try {
+        const body = await response.json()
+        if (body?.detail) detail = String(body.detail)
+      } catch {
+        /* keep the status line */
+      }
+      throw new Error(detail)
+    }
+    const blob = await response.blob()
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${novel.value?.title || 'novel'}.${format}`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+    flash('success', `Export .${format} diunduh.`)
+  } catch (err) {
+    flash('error', `Gagal export .${format}: ${err.message}`)
+  }
+}
+
 async function saveChapter() {
   if (!editing.value) return
   savingEdit.value = true
@@ -514,6 +548,23 @@ onBeforeUnmount(stopStream)
               {{ novel.pending_count }} pending
             </span>
           </div>
+        </div>
+
+        <div class="mt-3 flex flex-wrap items-center gap-2">
+          <button
+            class="btn-primary !px-3 !py-1.5 text-xs"
+            :disabled="!novel.translated_count"
+            :title="novel.translated_count ? 'Buka reader' : 'Belum ada bab terjemahan'"
+            @click="openReader()"
+          >
+            Baca
+          </button>
+          <button class="btn-ghost !px-3 !py-1.5 text-xs" @click="downloadExport('txt')">
+            Export (.txt)
+          </button>
+          <button class="btn-ghost !px-3 !py-1.5 text-xs" @click="downloadExport('json')">
+            Backup (.json)
+          </button>
         </div>
       </header>
 
@@ -751,6 +802,13 @@ onBeforeUnmount(stopStream)
                   {{ chapter.raw_content.length }}
                 </td>
                 <td class="px-3 py-2 text-right">
+                  <button
+                    v-if="chapter.status === 'translated'"
+                    class="btn-primary !px-2 !py-0.5 text-[11px]"
+                    @click="openReader(chapter.id)"
+                  >
+                    Baca
+                  </button>
                   <button class="btn-ghost !px-2 !py-0.5 text-[11px]" @click="openChapter(chapter)">
                     Lihat/Edit
                   </button>

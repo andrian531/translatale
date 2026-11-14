@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import LibraryView from '@/views/LibraryView.vue'
+import ReaderView from '@/views/ReaderView.vue'
 import ScrapersView from '@/views/ScrapersView.vue'
 import SettingsView from '@/views/SettingsView.vue'
 import WorkspaceView from '@/views/WorkspaceView.vue'
@@ -17,6 +18,12 @@ const routes = [
     name: 'workspace',
     component: WorkspaceView,
     meta: { title: 'Workspace' },
+  },
+  {
+    path: '/novels/:id/read/:chapterId?',
+    name: 'reader',
+    component: ReaderView,
+    meta: { title: 'Reader' },
   },
   {
     path: '/scrapers',

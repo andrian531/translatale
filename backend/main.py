@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 import config
 import database
-from routers import projects, scrapers, settings, translation
+from routers import projects, reader, scrapers, settings, translation
 
 __version__ = "0.1.0"
 
@@ -47,6 +47,7 @@ app.include_router(settings.router)
 app.include_router(projects.router)
 app.include_router(scrapers.router)
 app.include_router(translation.router)
+app.include_router(reader.router)
 
 
 @app.get("/api/health")

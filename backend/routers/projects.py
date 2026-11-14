@@ -108,6 +108,7 @@ class NovelOut(BaseModel):
     raw_count: int = 0
     translated_count: int = 0
     pending_count: int = 0
+    last_read_chapter_id: int | None = None
 
 
 class ChapterOut(BaseModel):
@@ -133,7 +134,8 @@ SELECT n.*,
        (SELECT COUNT(*) FROM chapters c WHERE c.novel_id = n.id) AS chapter_count,
        (SELECT COUNT(*) FROM chapters c WHERE c.novel_id = n.id AND c.status = 'raw') AS raw_count,
        (SELECT COUNT(*) FROM chapters c WHERE c.novel_id = n.id AND c.status = 'translated') AS translated_count,
-       (SELECT COUNT(*) FROM chapters c WHERE c.novel_id = n.id AND c.status = 'pending_fetch') AS pending_count
+       (SELECT COUNT(*) FROM chapters c WHERE c.novel_id = n.id AND c.status = 'pending_fetch') AS pending_count,
+       (SELECT rp.chapter_id FROM reading_progress rp WHERE rp.novel_id = n.id) AS last_read_chapter_id
 FROM novels AS n
 """
 

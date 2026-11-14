@@ -1,3 +1,3 @@
 """API routers."""
 
-__all__ = ["projects", "scrapers", "settings", "translation"]
+__all__ = ["projects", "reader", "scrapers", "settings", "translation"]

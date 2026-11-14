@@ -91,6 +91,13 @@ CREATE TABLE IF NOT EXISTS translation_jobs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_jobs_novel ON translation_jobs(novel_id, created_at);
+
+CREATE TABLE IF NOT EXISTS reading_progress (
+    novel_id       INTEGER PRIMARY KEY REFERENCES novels(id) ON DELETE CASCADE,
+    chapter_id     INTEGER REFERENCES chapters(id) ON DELETE SET NULL,
+    scroll_percent REAL    NOT NULL DEFAULT 0,
+    updated_at     TEXT    NOT NULL
+);
 """
 
 
