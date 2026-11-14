@@ -65,6 +65,32 @@ CREATE TABLE IF NOT EXISTS chapters (
 );
 
 CREATE INDEX IF NOT EXISTS idx_chapters_novel ON chapters(novel_id, chapter_number);
+
+CREATE TABLE IF NOT EXISTS novel_references (
+    novel_id             INTEGER PRIMARY KEY REFERENCES novels(id) ON DELETE CASCADE,
+    characters_json      TEXT NOT NULL DEFAULT '[]',
+    locations_json       TEXT NOT NULL DEFAULT '[]',
+    terms_json           TEXT NOT NULL DEFAULT '[]',
+    translation_guide    TEXT NOT NULL DEFAULT '',
+    chapter_context_json TEXT NOT NULL DEFAULT '[]',
+    updated_at           TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS translation_jobs (
+    id                 TEXT    PRIMARY KEY,
+    novel_id           INTEGER REFERENCES novels(id) ON DELETE CASCADE,
+    job_type           TEXT    NOT NULL,
+    status             TEXT    NOT NULL DEFAULT 'queued',
+    total_items        INTEGER NOT NULL DEFAULT 0,
+    completed_items    INTEGER NOT NULL DEFAULT 0,
+    current_chapter_id INTEGER,
+    message            TEXT    NOT NULL DEFAULT '',
+    error              TEXT    NOT NULL DEFAULT '',
+    created_at         TEXT    NOT NULL,
+    updated_at         TEXT    NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_jobs_novel ON translation_jobs(novel_id, created_at);
 """
 
 

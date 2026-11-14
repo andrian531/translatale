@@ -1,7 +1,8 @@
 <script setup>
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { novelsApi } from '@/api/novels'
+import { translationApi } from '@/api/translation'
 
 const route = useRoute()
 const router = useRouter()
@@ -14,17 +15,41 @@ const loading = ref(true)
 const error = ref('')
 const notice = ref(null)
 
+const tab = ref('chapters')
 const filter = ref('all')
 const selected = ref([])
 const fetching = ref(false)
 
+// -- job / live progress ------------------------------------------------
+const job = ref(null)
+const jobEvents = ref([])
+const jobMessage = ref('')
+const jobChunk = ref(null)
+let closeStream = null
+
+const jobActive = computed(
+  () => job.value && ['queued', 'running'].includes(job.value.status),
+)
+const jobPercent = computed(() => {
+  if (!job.value?.total_items) return 0
+  return Math.min(100, Math.round((job.value.completed_items / job.value.total_items) * 100))
+})
+
+// -- reference ----------------------------------------------------------
+const reference = ref(null)
+const referenceLoading = ref(false)
+const savingReference = ref(false)
+const referenceDirty = ref(false)
+
+// -- modals -------------------------------------------------------------
 const showManual = ref(false)
 const manualForm = reactive({ chapter_number: null, title: '', raw_content: '' })
 const savingManual = ref(false)
 
 const editing = ref(null)
-const editForm = reactive({ title: '', raw_content: '' })
+const editForm = reactive({ title: '', raw_content: '', translated_content: '' })
 const savingEdit = ref(false)
+const editPane = ref('both')
 
 const uploading = ref(false)
 const fileInput = ref(null)
@@ -33,7 +58,9 @@ const filters = [
   { value: 'all', label: 'Semua' },
   { value: 'pending_fetch', label: 'Pending Fetch' },
   { value: 'raw', label: 'Raw' },
+  { value: 'translating', label: 'Translating' },
   { value: 'translated', label: 'Translated' },
+  { value: 'error', label: 'Error' },
 ]
 
 const statusStyles = {
@@ -44,16 +71,37 @@ const statusStyles = {
   error: 'bg-rose-950/60 text-rose-400',
 }
 
+const gradeStyles = {
+  A: 'bg-emerald-950/60 text-emerald-400',
+  B: 'bg-sky-950/60 text-sky-400',
+  C: 'bg-amber-950/60 text-amber-400',
+  D: 'bg-rose-950/60 text-rose-400',
+}
+
+function gradeFor(score) {
+  if (score === null || score === undefined) return null
+  if (score >= 90) return 'A'
+  if (score >= 75) return 'B'
+  if (score >= 60) return 'C'
+  return 'D'
+}
+
 const visibleChapters = computed(() =>
   filter.value === 'all'
     ? chapters.value
     : chapters.value.filter((chapter) => chapter.status === filter.value),
 )
 
+const selectedChapters = computed(() =>
+  chapters.value.filter((chapter) => selected.value.includes(chapter.id)),
+)
+
+const translatableSelected = computed(() =>
+  selectedChapters.value.filter((chapter) => (chapter.raw_content || '').trim()),
+)
+
 const pendingSelected = computed(() =>
-  chapters.value.filter(
-    (chapter) => selected.value.includes(chapter.id) && chapter.status === 'pending_fetch',
-  ),
+  selectedChapters.value.filter((chapter) => chapter.status === 'pending_fetch'),
 )
 
 const allVisibleSelected = computed(
@@ -69,6 +117,9 @@ function flash(type, text) {
   }, 7000)
 }
 
+// ----------------------------------------------------------------------
+// Loading
+// ----------------------------------------------------------------------
 async function load() {
   loading.value = true
   error.value = ''
@@ -87,6 +138,28 @@ async function load() {
   }
 }
 
+async function loadReference() {
+  referenceLoading.value = true
+  try {
+    const data = await translationApi.getReference(novelId.value)
+    reference.value = {
+      characters: data.characters ?? [],
+      locations: data.locations ?? [],
+      terms: data.terms ?? [],
+      translation_guide: data.translation_guide ?? '',
+      chapter_context: data.chapter_context ?? [],
+    }
+    referenceDirty.value = false
+  } catch (err) {
+    flash('error', `Gagal memuat reference: ${err.message}`)
+  } finally {
+    referenceLoading.value = false
+  }
+}
+
+// ----------------------------------------------------------------------
+// Selection
+// ----------------------------------------------------------------------
 function toggle(id) {
   selected.value = selected.value.includes(id)
     ? selected.value.filter((item) => item !== id)
@@ -98,11 +171,111 @@ function toggleAll() {
     const visibleIds = visibleChapters.value.map((chapter) => chapter.id)
     selected.value = selected.value.filter((id) => !visibleIds.includes(id))
   } else {
-    const merged = new Set([...selected.value, ...visibleChapters.value.map((c) => c.id)])
-    selected.value = [...merged]
+    selected.value = [...new Set([...selected.value, ...visibleChapters.value.map((c) => c.id)])]
   }
 }
 
+// ----------------------------------------------------------------------
+// Jobs
+// ----------------------------------------------------------------------
+function stopStream() {
+  if (closeStream) {
+    closeStream()
+    closeStream = null
+  }
+}
+
+function watchJob(jobId) {
+  stopStream()
+  jobEvents.value = []
+  closeStream = translationApi.subscribeJob(jobId, {
+    onEvent(event) {
+      jobEvents.value = [...jobEvents.value.slice(-40), event]
+      if (event.message) jobMessage.value = event.message
+      if (event.type === 'chunk') {
+        jobChunk.value = { index: event.chunk_index, total: event.chunk_total }
+      }
+      if (event.type === 'chapter' || event.type === 'chapter_done') {
+        jobChunk.value = null
+      }
+      if (job.value) {
+        job.value = {
+          ...job.value,
+          status: event.status ?? job.value.status,
+          completed_items: event.completed_items ?? job.value.completed_items,
+          total_items: event.total_items ?? job.value.total_items,
+          message: event.message ?? job.value.message,
+        }
+      }
+    },
+    async onDone(event) {
+      closeStream = null
+      jobChunk.value = null
+      if (job.value) {
+        job.value = { ...job.value, status: event.status ?? job.value.status }
+      }
+      await Promise.all([load(), loadReference()])
+      if (event.type === 'error') {
+        flash('error', `Job gagal: ${event.message}`)
+      } else if (event.type === 'cancelled') {
+        flash('error', 'Job dibatalkan.')
+      } else {
+        flash('success', 'Job selesai.')
+      }
+    },
+    onError() {
+      closeStream = null
+      flash('error', 'Koneksi progres terputus. Muat ulang halaman untuk melihat status.')
+    },
+  })
+}
+
+async function startTranslate() {
+  const ids = translatableSelected.value.map((chapter) => chapter.id)
+  if (!ids.length) return
+  try {
+    const started = await translationApi.startTranslate(novelId.value, ids)
+    job.value = started
+    jobMessage.value = started.message
+    watchJob(started.id)
+    await load()
+  } catch (err) {
+    flash('error', `Gagal memulai translate: ${err.message}`)
+  }
+}
+
+async function startAnalyze() {
+  try {
+    const ids = selected.value.length ? selected.value : null
+    const started = await translationApi.startAnalyze(novelId.value, ids)
+    job.value = started
+    jobMessage.value = started.message
+    watchJob(started.id)
+  } catch (err) {
+    flash('error', `Gagal memulai analisa: ${err.message}`)
+  }
+}
+
+async function cancelJob() {
+  if (!job.value) return
+  try {
+    const updated = await translationApi.cancelJob(job.value.id)
+    job.value = updated
+  } catch (err) {
+    flash('error', `Gagal membatalkan: ${err.message}`)
+  }
+}
+
+function dismissJob() {
+  stopStream()
+  job.value = null
+  jobEvents.value = []
+  jobChunk.value = null
+}
+
+// ----------------------------------------------------------------------
+// Chapters
+// ----------------------------------------------------------------------
 async function fetchSelected() {
   const ids = pendingSelected.value.map((chapter) => chapter.id)
   if (!ids.length) return
@@ -111,10 +284,7 @@ async function fetchSelected() {
     const result = await novelsApi.fetchChapters(novelId.value, ids)
     await load()
     if (result.failed) {
-      flash(
-        'error',
-        `${result.fetched} bab berhasil, ${result.failed} gagal. ${result.errors[0]?.error ?? ''}`,
-      )
+      flash('error', `${result.fetched} bab berhasil, ${result.failed} gagal.`)
     } else {
       flash('success', `${result.fetched} bab berhasil di-fetch.`)
     }
@@ -176,6 +346,8 @@ function openChapter(chapter) {
   editing.value = chapter
   editForm.title = chapter.title
   editForm.raw_content = chapter.raw_content
+  editForm.translated_content = chapter.translated_content
+  editPane.value = 'both'
 }
 
 async function saveChapter() {
@@ -185,6 +357,7 @@ async function saveChapter() {
     await novelsApi.updateChapter(editing.value.id, {
       title: editForm.title,
       raw_content: editForm.raw_content,
+      translated_content: editForm.translated_content,
     })
     editing.value = null
     await load()
@@ -207,8 +380,90 @@ async function removeChapter(chapter) {
   }
 }
 
-watch(novelId, load)
-onMounted(load)
+// ----------------------------------------------------------------------
+// Reference editing
+// ----------------------------------------------------------------------
+function markDirty() {
+  referenceDirty.value = true
+}
+
+function addCharacter() {
+  reference.value.characters.push({
+    name: '',
+    romanized_name: '',
+    age: '',
+    gender: '',
+    aliases: [],
+    relationships: '',
+    notes: '',
+  })
+  markDirty()
+}
+
+function addTerm() {
+  reference.value.terms.push({ source: '', target: '', note: '' })
+  markDirty()
+}
+
+function addLocation() {
+  reference.value.locations.push({ source: '', target: '', note: '' })
+  markDirty()
+}
+
+function removeAt(list, index) {
+  list.splice(index, 1)
+  markDirty()
+}
+
+function aliasesToText(character) {
+  return (character.aliases ?? []).join(', ')
+}
+
+function setAliases(character, value) {
+  character.aliases = value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+  markDirty()
+}
+
+async function saveReference() {
+  savingReference.value = true
+  try {
+    const payload = {
+      characters: reference.value.characters.filter((item) => item.name?.trim()),
+      locations: reference.value.locations.filter((item) => item.source?.trim()),
+      terms: reference.value.terms.filter((item) => item.source?.trim()),
+      translation_guide: reference.value.translation_guide,
+    }
+    const saved = await translationApi.saveReference(novelId.value, payload)
+    reference.value = {
+      characters: saved.characters ?? [],
+      locations: saved.locations ?? [],
+      terms: saved.terms ?? [],
+      translation_guide: saved.translation_guide ?? '',
+      chapter_context: saved.chapter_context ?? [],
+    }
+    referenceDirty.value = false
+    flash('success', 'Reference disimpan.')
+  } catch (err) {
+    flash('error', `Gagal menyimpan reference: ${err.message}`)
+  } finally {
+    savingReference.value = false
+  }
+}
+
+watch(novelId, async () => {
+  stopStream()
+  job.value = null
+  await Promise.all([load(), loadReference()])
+})
+
+onMounted(async () => {
+  await Promise.all([load(), loadReference()])
+})
+
+onBeforeUnmount(stopStream)
 </script>
 
 <template>
@@ -227,7 +482,7 @@ onMounted(load)
     </div>
 
     <template v-else-if="novel">
-      <header class="mb-6">
+      <header class="mb-5">
         <div class="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h1 class="text-2xl font-semibold tracking-tight text-white">{{ novel.title }}</h1>
@@ -260,11 +515,39 @@ onMounted(load)
             </span>
           </div>
         </div>
-
-        <p v-if="novel.synopsis" class="mt-3 max-w-3xl text-sm text-slate-400">
-          {{ novel.synopsis }}
-        </p>
       </header>
+
+      <!-- tabs -->
+      <div class="mb-5 flex gap-1 border-b border-ink-800">
+        <button
+          class="px-4 py-2 text-sm font-medium"
+          :class="
+            tab === 'chapters'
+              ? 'border-b-2 border-indigo-500 text-white'
+              : 'text-slate-400 hover:text-slate-200'
+          "
+          @click="tab = 'chapters'"
+        >
+          Chapters
+        </button>
+        <button
+          class="px-4 py-2 text-sm font-medium"
+          :class="
+            tab === 'reference'
+              ? 'border-b-2 border-indigo-500 text-white'
+              : 'text-slate-400 hover:text-slate-200'
+          "
+          @click="tab = 'reference'"
+        >
+          Story &amp; Reference
+          <span
+            v-if="reference?.characters?.length || reference?.terms?.length"
+            class="ml-1 text-[11px] text-slate-500"
+          >
+            ({{ reference.characters.length }} karakter, {{ reference.terms.length }} istilah)
+          </span>
+        </button>
+      </div>
 
       <div
         v-if="notice"
@@ -278,132 +561,398 @@ onMounted(load)
         {{ notice.text }}
       </div>
 
-      <!-- actions -->
-      <div class="mb-5 flex flex-wrap items-center gap-2">
-        <button
-          class="btn-primary"
-          :disabled="fetching || !pendingSelected.length"
-          @click="fetchSelected"
-        >
-          {{ fetching ? 'Mengambil…' : `Fetch Raw Terpilih (${pendingSelected.length})` }}
-        </button>
-        <button class="btn-ghost" @click="openManual">+ Tambah Bab Manual</button>
-        <button class="btn-ghost" :disabled="uploading" @click="pickFiles">
-          {{ uploading ? 'Mengunggah…' : 'Upload .txt (Batch)' }}
-        </button>
-        <input
-          ref="fileInput"
-          type="file"
-          accept=".txt,text/plain"
-          multiple
-          class="hidden"
-          @change="onFilesChosen"
-        />
-        <span class="ml-auto text-xs text-slate-500">
-          Translate tersedia di Phase 3
-        </span>
-        <button class="btn-ghost !px-2.5 !py-1 text-xs" disabled title="Phase 3">
-          Translate Selected
-        </button>
-      </div>
-
-      <!-- filters -->
-      <div class="mb-3 flex flex-wrap gap-1">
-        <button
-          v-for="item in filters"
-          :key="item.value"
-          class="rounded-lg px-3 py-1.5 text-xs font-medium"
-          :class="
-            filter === item.value
-              ? 'bg-ink-800 text-white'
-              : 'text-slate-400 hover:bg-ink-850 hover:text-slate-200'
-          "
-          @click="filter = item.value"
-        >
-          {{ item.label }}
-          <span class="text-slate-500">
-            {{
-              item.value === 'all'
-                ? chapters.length
-                : chapters.filter((c) => c.status === item.value).length
-            }}
+      <!-- ===================== live progress ===================== -->
+      <div
+        v-if="job"
+        class="mb-5 rounded-xl border px-4 py-3"
+        :class="
+          jobActive
+            ? 'border-indigo-900/60 bg-indigo-950/20'
+            : job.status === 'completed'
+              ? 'border-emerald-900/60 bg-emerald-950/20'
+              : 'border-rose-900/60 bg-rose-950/20'
+        "
+      >
+        <div class="flex flex-wrap items-center gap-2 text-sm">
+          <span class="font-medium text-slate-100">
+            {{ job.job_type === 'translate' ? 'Translate' : 'Analisa Cerita' }}
           </span>
-        </button>
+          <span class="badge bg-ink-800 text-slate-300">{{ job.status }}</span>
+          <span class="text-xs text-slate-400">
+            {{ job.completed_items }}/{{ job.total_items }}
+          </span>
+          <span v-if="jobChunk" class="text-xs text-slate-500">
+            chunk {{ jobChunk.index }}/{{ jobChunk.total }}
+          </span>
+          <div class="ml-auto flex gap-2">
+            <button
+              v-if="jobActive"
+              class="btn-danger !px-2.5 !py-1 text-xs"
+              @click="cancelJob"
+            >
+              Cancel
+            </button>
+            <button v-else class="btn-ghost !px-2.5 !py-1 text-xs" @click="dismissJob">
+              Tutup
+            </button>
+          </div>
+        </div>
+
+        <div class="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-ink-800">
+          <div
+            class="h-full rounded-full transition-all"
+            :class="job.status === 'failed' ? 'bg-rose-500' : 'bg-indigo-500'"
+            :style="{ width: `${jobPercent}%` }"
+          />
+        </div>
+
+        <p class="mt-2 text-xs text-slate-400">{{ jobMessage || job.message }}</p>
+        <p v-if="job.error" class="mt-1 text-xs text-rose-400">{{ job.error }}</p>
+
+        <div
+          v-if="jobEvents.length"
+          class="mt-2 max-h-28 overflow-y-auto rounded bg-ink-950/60 p-2 font-mono text-[11px] text-slate-500"
+        >
+          <div v-for="(event, index) in jobEvents.slice(-12)" :key="index">
+            <span class="text-slate-600">{{ event.type }}</span>
+            <span v-if="event.chapter_number"> · bab {{ event.chapter_number }}</span>
+            <span v-if="event.chunk_index"> · chunk {{ event.chunk_index }}/{{ event.chunk_total }}</span>
+            <span v-if="event.grade"> · {{ event.quality_score }} ({{ event.grade }})</span>
+            <span v-if="event.message"> — {{ event.message }}</span>
+          </div>
+        </div>
       </div>
 
-      <!-- chapter table -->
-      <div class="overflow-hidden rounded-xl border border-ink-700">
-        <table class="w-full text-left text-sm">
-          <thead class="bg-ink-850 text-[11px] uppercase tracking-wide text-slate-500">
-            <tr>
-              <th class="w-10 px-3 py-2">
-                <input
-                  type="checkbox"
-                  class="h-3.5 w-3.5 rounded border-ink-600 bg-ink-850 text-indigo-600"
-                  :checked="allVisibleSelected"
-                  @change="toggleAll"
-                />
-              </th>
-              <th class="w-14 px-3 py-2">#</th>
-              <th class="px-3 py-2">Judul</th>
-              <th class="w-32 px-3 py-2">Status</th>
-              <th class="w-20 px-3 py-2 text-right">Chars</th>
-              <th class="w-40 px-3 py-2 text-right">Aksi</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-ink-800">
-            <tr v-if="!visibleChapters.length">
-              <td colspan="6" class="px-3 py-10 text-center text-sm text-slate-500">
-                Tidak ada bab pada filter ini.
-              </td>
-            </tr>
-            <tr
-              v-for="chapter in visibleChapters"
-              :key="chapter.id"
-              class="hover:bg-ink-850/60"
-            >
-              <td class="px-3 py-2">
-                <input
-                  type="checkbox"
-                  class="h-3.5 w-3.5 rounded border-ink-600 bg-ink-850 text-indigo-600"
-                  :checked="selected.includes(chapter.id)"
-                  @change="toggle(chapter.id)"
-                />
-              </td>
-              <td class="px-3 py-2 font-mono text-xs text-slate-500">
-                {{ chapter.chapter_number }}
-              </td>
-              <td class="px-3 py-2">
-                <button
-                  class="text-left text-slate-200 hover:text-white hover:underline"
-                  @click="openChapter(chapter)"
-                >
-                  {{ chapter.title || '(tanpa judul)' }}
-                </button>
-              </td>
-              <td class="px-3 py-2">
-                <span class="badge" :class="statusStyles[chapter.status] ?? 'bg-ink-800 text-slate-400'">
-                  {{ chapter.status }}
+      <!-- ===================== TAB: chapters ===================== -->
+      <template v-if="tab === 'chapters'">
+        <div class="mb-5 flex flex-wrap items-center gap-2">
+          <button
+            class="btn-primary"
+            :disabled="!translatableSelected.length || jobActive"
+            @click="startTranslate"
+          >
+            Translate Terpilih ({{ translatableSelected.length }})
+          </button>
+          <button class="btn-ghost" :disabled="jobActive" @click="startAnalyze">
+            Analisa Cerita (AI)
+          </button>
+          <button
+            class="btn-ghost"
+            :disabled="fetching || !pendingSelected.length"
+            @click="fetchSelected"
+          >
+            {{ fetching ? 'Mengambil…' : `Fetch Raw (${pendingSelected.length})` }}
+          </button>
+          <button class="btn-ghost" @click="openManual">+ Bab Manual</button>
+          <button class="btn-ghost" :disabled="uploading" @click="pickFiles">
+            {{ uploading ? 'Mengunggah…' : 'Upload .txt' }}
+          </button>
+          <input
+            ref="fileInput"
+            type="file"
+            accept=".txt,text/plain"
+            multiple
+            class="hidden"
+            @change="onFilesChosen"
+          />
+        </div>
+
+        <div class="mb-3 flex flex-wrap gap-1">
+          <button
+            v-for="item in filters"
+            :key="item.value"
+            class="rounded-lg px-3 py-1.5 text-xs font-medium"
+            :class="
+              filter === item.value
+                ? 'bg-ink-800 text-white'
+                : 'text-slate-400 hover:bg-ink-850 hover:text-slate-200'
+            "
+            @click="filter = item.value"
+          >
+            {{ item.label }}
+            <span class="text-slate-500">
+              {{
+                item.value === 'all'
+                  ? chapters.length
+                  : chapters.filter((c) => c.status === item.value).length
+              }}
+            </span>
+          </button>
+        </div>
+
+        <div class="overflow-hidden rounded-xl border border-ink-700">
+          <table class="w-full text-left text-sm">
+            <thead class="bg-ink-850 text-[11px] uppercase tracking-wide text-slate-500">
+              <tr>
+                <th class="w-10 px-3 py-2">
+                  <input
+                    type="checkbox"
+                    class="h-3.5 w-3.5 rounded border-ink-600 bg-ink-850 text-indigo-600"
+                    :checked="allVisibleSelected"
+                    @change="toggleAll"
+                  />
+                </th>
+                <th class="w-12 px-3 py-2">#</th>
+                <th class="px-3 py-2">Judul</th>
+                <th class="w-28 px-3 py-2">Status</th>
+                <th class="w-24 px-3 py-2">Quality</th>
+                <th class="w-16 px-3 py-2 text-right">Chars</th>
+                <th class="w-36 px-3 py-2 text-right">Aksi</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-ink-800">
+              <tr v-if="!visibleChapters.length">
+                <td colspan="7" class="px-3 py-10 text-center text-sm text-slate-500">
+                  Tidak ada bab pada filter ini.
+                </td>
+              </tr>
+              <tr v-for="chapter in visibleChapters" :key="chapter.id" class="hover:bg-ink-850/60">
+                <td class="px-3 py-2">
+                  <input
+                    type="checkbox"
+                    class="h-3.5 w-3.5 rounded border-ink-600 bg-ink-850 text-indigo-600"
+                    :checked="selected.includes(chapter.id)"
+                    @change="toggle(chapter.id)"
+                  />
+                </td>
+                <td class="px-3 py-2 font-mono text-xs text-slate-500">
+                  {{ chapter.chapter_number }}
+                </td>
+                <td class="px-3 py-2">
+                  <button
+                    class="text-left text-slate-200 hover:text-white hover:underline"
+                    @click="openChapter(chapter)"
+                  >
+                    {{ chapter.title || '(tanpa judul)' }}
+                  </button>
+                  <p v-if="chapter.title_translated" class="text-[11px] text-slate-500">
+                    {{ chapter.title_translated }}
+                  </p>
+                </td>
+                <td class="px-3 py-2">
+                  <span
+                    class="badge"
+                    :class="statusStyles[chapter.status] ?? 'bg-ink-800 text-slate-400'"
+                  >
+                    {{ chapter.status }}
+                  </span>
+                </td>
+                <td class="px-3 py-2">
+                  <span
+                    v-if="chapter.quality_score !== null && chapter.quality_score !== undefined"
+                    class="badge"
+                    :class="gradeStyles[gradeFor(chapter.quality_score)]"
+                  >
+                    {{ Math.round(chapter.quality_score) }} · {{ gradeFor(chapter.quality_score) }}
+                  </span>
+                  <span v-else class="text-xs text-slate-600">—</span>
+                </td>
+                <td class="px-3 py-2 text-right font-mono text-xs text-slate-500">
+                  {{ chapter.raw_content.length }}
+                </td>
+                <td class="px-3 py-2 text-right">
+                  <button class="btn-ghost !px-2 !py-0.5 text-[11px]" @click="openChapter(chapter)">
+                    Lihat/Edit
+                  </button>
+                  <button
+                    class="btn-danger ml-1 !px-2 !py-0.5 text-[11px]"
+                    @click="removeChapter(chapter)"
+                  >
+                    Hapus
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </template>
+
+      <!-- ===================== TAB: reference ===================== -->
+      <template v-else>
+        <div class="mb-4 flex flex-wrap items-center gap-2">
+          <button class="btn-ghost" :disabled="jobActive" @click="startAnalyze">
+            Run AI Analysis
+          </button>
+          <button class="btn-primary" :disabled="savingReference" @click="saveReference">
+            {{ savingReference ? 'Menyimpan…' : 'Simpan Perubahan' }}
+          </button>
+          <span v-if="referenceDirty" class="text-xs text-amber-400">ada perubahan belum disimpan</span>
+          <span v-else class="text-xs text-slate-500">tersimpan</span>
+        </div>
+
+        <p v-if="referenceLoading" class="text-sm text-slate-500">Memuat reference…</p>
+
+        <div v-else-if="reference" class="space-y-5">
+          <!-- guide -->
+          <section class="card">
+            <h2 class="mb-2 text-sm font-semibold text-white">Translation Guide</h2>
+            <p class="mb-2 text-xs text-slate-500">
+              Gaya bahasa, nada, aturan penamaan. Disuntikkan ke setiap prompt translasi.
+            </p>
+            <textarea
+              v-model="reference.translation_guide"
+              class="input h-28 resize-y text-xs"
+              placeholder="mis. Gunakan nada formal, pertahankan istilah militer, nama karakter memakai romanisasi…"
+              @input="markDirty"
+            />
+          </section>
+
+          <!-- characters -->
+          <section class="card">
+            <div class="mb-3 flex items-center justify-between">
+              <h2 class="text-sm font-semibold text-white">
+                Characters
+                <span class="ml-1 text-xs font-normal text-slate-500">
+                  ({{ reference.characters.length }})
                 </span>
-              </td>
-              <td class="px-3 py-2 text-right font-mono text-xs text-slate-500">
-                {{ chapter.raw_content.length }}
-              </td>
-              <td class="px-3 py-2 text-right">
-                <button class="btn-ghost !px-2 !py-0.5 text-[11px]" @click="openChapter(chapter)">
-                  Lihat/Edit
-                </button>
+              </h2>
+              <button class="btn-ghost !px-2.5 !py-1 text-xs" @click="addCharacter">
+                + Karakter
+              </button>
+            </div>
+
+            <p v-if="!reference.characters.length" class="text-xs text-slate-500">
+              Belum ada karakter. Jalankan Run AI Analysis atau tambah manual.
+            </p>
+
+            <div v-for="(character, index) in reference.characters" :key="index" class="mb-3 rounded-lg border border-ink-800 p-3">
+              <div class="grid gap-2 sm:grid-cols-4">
+                <div>
+                  <label class="label">Nama (sumber)</label>
+                  <input v-model="character.name" class="input text-xs" @input="markDirty" />
+                </div>
+                <div>
+                  <label class="label">Romanized</label>
+                  <input
+                    v-model="character.romanized_name"
+                    class="input text-xs"
+                    @input="markDirty"
+                  />
+                </div>
+                <div>
+                  <label class="label">Gender</label>
+                  <input v-model="character.gender" class="input text-xs" @input="markDirty" />
+                </div>
+                <div>
+                  <label class="label">Usia</label>
+                  <input v-model="character.age" class="input text-xs" @input="markDirty" />
+                </div>
+              </div>
+              <div class="mt-2 grid gap-2 sm:grid-cols-3">
+                <div>
+                  <label class="label">Alias (pisahkan koma)</label>
+                  <input
+                    :value="aliasesToText(character)"
+                    class="input text-xs"
+                    @input="setAliases(character, $event.target.value)"
+                  />
+                </div>
+                <div>
+                  <label class="label">Relasi</label>
+                  <input
+                    v-model="character.relationships"
+                    class="input text-xs"
+                    @input="markDirty"
+                  />
+                </div>
+                <div>
+                  <label class="label">Catatan</label>
+                  <input v-model="character.notes" class="input text-xs" @input="markDirty" />
+                </div>
+              </div>
+              <div class="mt-2 text-right">
                 <button
-                  class="btn-danger ml-1 !px-2 !py-0.5 text-[11px]"
-                  @click="removeChapter(chapter)"
+                  class="btn-danger !px-2 !py-0.5 text-[11px]"
+                  @click="removeAt(reference.characters, index)"
                 >
-                  Hapus
+                  Hapus karakter
                 </button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- terms -->
+          <section class="card">
+            <div class="mb-3 flex items-center justify-between">
+              <h2 class="text-sm font-semibold text-white">
+                Terms / Glossary
+                <span class="ml-1 text-xs font-normal text-slate-500">
+                  ({{ reference.terms.length }})
+                </span>
+              </h2>
+              <button class="btn-ghost !px-2.5 !py-1 text-xs" @click="addTerm">+ Istilah</button>
+            </div>
+            <p v-if="!reference.terms.length" class="text-xs text-slate-500">
+              Istilah wajib (tingkatan, teknik, organisasi). Dipakai juga untuk skor kepatuhan.
+            </p>
+            <div
+              v-for="(term, index) in reference.terms"
+              :key="index"
+              class="mb-2 grid gap-2 sm:grid-cols-[1fr_1fr_1fr_auto]"
+            >
+              <input v-model="term.source" class="input text-xs" placeholder="sumber" @input="markDirty" />
+              <input v-model="term.target" class="input text-xs" placeholder="terjemahan" @input="markDirty" />
+              <input v-model="term.note" class="input text-xs" placeholder="catatan" @input="markDirty" />
+              <button class="btn-danger !px-2 !py-1 text-[11px]" @click="removeAt(reference.terms, index)">
+                ✕
+              </button>
+            </div>
+          </section>
+
+          <!-- locations -->
+          <section class="card">
+            <div class="mb-3 flex items-center justify-between">
+              <h2 class="text-sm font-semibold text-white">
+                Locations
+                <span class="ml-1 text-xs font-normal text-slate-500">
+                  ({{ reference.locations.length }})
+                </span>
+              </h2>
+              <button class="btn-ghost !px-2.5 !py-1 text-xs" @click="addLocation">+ Lokasi</button>
+            </div>
+            <p v-if="!reference.locations.length" class="text-xs text-slate-500">Belum ada lokasi.</p>
+            <div
+              v-for="(location, index) in reference.locations"
+              :key="index"
+              class="mb-2 grid gap-2 sm:grid-cols-[1fr_1fr_1fr_auto]"
+            >
+              <input v-model="location.source" class="input text-xs" placeholder="sumber" @input="markDirty" />
+              <input v-model="location.target" class="input text-xs" placeholder="terjemahan" @input="markDirty" />
+              <input v-model="location.note" class="input text-xs" placeholder="catatan" @input="markDirty" />
+              <button
+                class="btn-danger !px-2 !py-1 text-[11px]"
+                @click="removeAt(reference.locations, index)"
+              >
+                ✕
+              </button>
+            </div>
+          </section>
+
+          <!-- rolling context -->
+          <section class="card">
+            <h2 class="mb-2 text-sm font-semibold text-white">
+              Rolling Chapter Context
+              <span class="ml-1 text-xs font-normal text-slate-500">
+                ({{ reference.chapter_context.length }}/5 terakhir)
+              </span>
+            </h2>
+            <p v-if="!reference.chapter_context.length" class="text-xs text-slate-500">
+              Belum ada ringkasan. Jalankan Run AI Analysis untuk mengisinya.
+            </p>
+            <ol v-else class="space-y-2">
+              <li
+                v-for="entry in reference.chapter_context"
+                :key="entry.chapter_id"
+                class="rounded-lg border border-ink-800 px-3 py-2 text-xs"
+              >
+                <span class="font-mono text-slate-500">Bab {{ entry.chapter_number }}</span>
+                <span class="ml-2 text-slate-300">{{ entry.title }}</span>
+                <p class="mt-1 text-slate-400">{{ entry.summary }}</p>
+              </li>
+            </ol>
+          </section>
+        </div>
+      </template>
     </template>
 
     <!-- ===================== manual chapter modal ===================== -->
@@ -462,50 +1011,80 @@ onMounted(load)
       </form>
     </div>
 
-    <!-- ===================== chapter edit modal ===================== -->
+    <!-- ===================== chapter raw/translated modal ===================== -->
     <div
       v-if="editing"
-      class="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-black/70 p-4 py-10"
+      class="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-black/70 p-4 py-8"
       @click.self="editing = null"
     >
       <form
-        class="w-full max-w-3xl space-y-4 rounded-xl border border-ink-700 bg-ink-900 p-5 shadow-2xl"
+        class="w-full max-w-6xl space-y-3 rounded-xl border border-ink-700 bg-ink-900 p-5 shadow-2xl"
         @submit.prevent="saveChapter"
       >
-        <div class="flex items-center justify-between">
+        <div class="flex flex-wrap items-center justify-between gap-2">
           <h2 class="text-sm font-semibold text-white">
             Bab {{ editing.chapter_number }}
-            <span class="ml-2 badge" :class="statusStyles[editing.status]">
-              {{ editing.status }}
+            <span class="badge ml-2" :class="statusStyles[editing.status]">{{ editing.status }}</span>
+            <span
+              v-if="editing.quality_score !== null && editing.quality_score !== undefined"
+              class="badge ml-1"
+              :class="gradeStyles[gradeFor(editing.quality_score)]"
+            >
+              {{ Math.round(editing.quality_score) }} · {{ gradeFor(editing.quality_score) }}
             </span>
           </h2>
-          <button type="button" class="text-slate-500 hover:text-slate-200" @click="editing = null">
-            ✕
-          </button>
+          <div class="flex items-center gap-1">
+            <button
+              v-for="pane in ['both', 'raw', 'translated']"
+              :key="pane"
+              type="button"
+              class="rounded px-2 py-1 text-[11px]"
+              :class="editPane === pane ? 'bg-ink-800 text-white' : 'text-slate-400 hover:text-slate-200'"
+              @click="editPane = pane"
+            >
+              {{ pane === 'both' ? 'Side by side' : pane === 'raw' ? 'Raw' : 'Translated' }}
+            </button>
+            <button type="button" class="ml-2 text-slate-500 hover:text-slate-200" @click="editing = null">
+              ✕
+            </button>
+          </div>
         </div>
+
         <div>
           <label class="label" for="edit-title">Judul</label>
           <input id="edit-title" v-model="editForm.title" class="input" type="text" />
         </div>
-        <div>
-          <label class="label" for="edit-content">Isi raw</label>
-          <textarea
-            id="edit-content"
-            v-model="editForm.raw_content"
-            class="input h-80 resize-y font-mono text-xs"
-            placeholder="Belum ada isi — jalankan Fetch Raw untuk bab ini."
-          />
-        </div>
-        <div class="flex items-center justify-between">
-          <span class="text-[11px] text-slate-500">
-            {{ editForm.raw_content.length }} karakter
-          </span>
-          <div class="flex gap-2">
-            <button type="button" class="btn-ghost" @click="editing = null">Batal</button>
-            <button type="submit" class="btn-primary" :disabled="savingEdit">
-              {{ savingEdit ? 'Menyimpan…' : 'Simpan' }}
-            </button>
+
+        <div class="grid gap-3" :class="editPane === 'both' ? 'lg:grid-cols-2' : 'grid-cols-1'">
+          <div v-if="editPane !== 'translated'">
+            <label class="label" for="edit-raw">
+              Raw ({{ editForm.raw_content.length }} karakter)
+            </label>
+            <textarea
+              id="edit-raw"
+              v-model="editForm.raw_content"
+              class="input h-80 resize-y font-mono text-xs"
+              placeholder="Belum ada isi — jalankan Fetch Raw untuk bab ini."
+            />
           </div>
+          <div v-if="editPane !== 'raw'">
+            <label class="label" for="edit-translated">
+              Translated ({{ editForm.translated_content.length }} karakter)
+            </label>
+            <textarea
+              id="edit-translated"
+              v-model="editForm.translated_content"
+              class="input h-80 resize-y font-mono text-xs"
+              placeholder="Belum diterjemahkan — pilih bab ini lalu klik Translate Terpilih."
+            />
+          </div>
+        </div>
+
+        <div class="flex items-center justify-end gap-2">
+          <button type="button" class="btn-ghost" @click="editing = null">Batal</button>
+          <button type="submit" class="btn-primary" :disabled="savingEdit">
+            {{ savingEdit ? 'Menyimpan…' : 'Simpan' }}
+          </button>
         </div>
       </form>
     </div>
