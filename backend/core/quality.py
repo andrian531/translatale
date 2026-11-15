@@ -234,8 +234,12 @@ def inspect_chapter_cleanliness(
     raw = raw_content or ""
     translated = translated_content or ""
 
-    _scan_text("raw", raw)
-    _scan_text("translated", translated)
+    if status == "translated" and translated.strip():
+        _scan_text("translated", translated)
+    else:
+        _scan_text("raw", raw)
+        if translated.strip():
+            _scan_text("translated", translated)
 
     if status == "raw" and raw.strip():
         if len(re.sub(r"\s+", "", raw)) < 80:

@@ -365,6 +365,7 @@ def test_chapter_cleanliness_flags_scrape_noise_and_leftovers(client):
         client,
         novel["id"],
         "第2章",
+        "记得收藏网址 https://www.example.com/ 哦！\n"
         "Panjang teks mentah yang bersih dan lebih dari delapan puluh karakter supaya tidak ditandai pendek.",
         number=2,
     )
@@ -372,6 +373,14 @@ def test_chapter_cleanliness_flags_scrape_noise_and_leftovers(client):
         clean["id"],
         "Terjemahan bersih tanpa iklan situs atau navigasi halaman, cukup panjang untuk sebuah bab.",
         "Bab 2",
+    )
+
+    raw_dirty = _add_chapter(
+        client,
+        novel["id"],
+        "第3章",
+        "Isi cerita.\n\n记得收藏网址 https://www.example.com/ 哦！",
+        number=3,
     )
 
     listed = client.get(f"/api/novels/{novel['id']}/chapters").json()
@@ -382,5 +391,9 @@ def test_chapter_cleanliness_flags_scrape_noise_and_leftovers(client):
     assert "promo" in codes
     assert "navigation" in codes
 
+    # Once translated_content is clean, dirty raw_content no longer flags a translated chapter.
     assert by_id[clean["id"]]["needs_review"] is False
     assert by_id[clean["id"]]["review_issues"] == []
+
+    # Untranslated raw chapter with scrape noise still gets flagged before translation.
+    assert by_id[raw_dirty["id"]]["needs_review"] is True
