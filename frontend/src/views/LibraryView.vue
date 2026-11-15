@@ -222,28 +222,29 @@ onMounted(load)
       <button class="btn-primary mt-6" @click="openModal">{{ t('library.addNovel') }}</button>
     </div>
 
-    <div v-else class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+    <div v-else class="grid gap-4 md:grid-cols-2">
       <article
         v-for="novel in novels"
         :key="novel.id"
-        class="card flex flex-col gap-3 transition-colors hover:border-ink-600"
+        class="card flex gap-4 transition-colors hover:border-ink-600"
       >
-        <div class="flex items-start gap-3">
-          <img
-            v-if="novel.cover_url"
-            :src="novel.cover_url"
-            :alt="novel.title_translated || novel.title"
-            class="aspect-[2/3] w-14 shrink-0 rounded-lg border border-ink-700 object-cover"
-          />
-          <div
-            v-else
-            class="flex aspect-[2/3] w-14 shrink-0 items-center justify-center rounded-lg border border-dashed border-ink-700 bg-ink-850 text-[10px] font-medium uppercase tracking-wider text-slate-500"
-          >
-            N/A
-          </div>
-          <div class="min-w-0 flex-1 space-y-1">
+        <img
+          v-if="novel.cover_url"
+          :src="novel.cover_url"
+          :alt="novel.title_translated || novel.title"
+          class="aspect-[2/3] w-28 shrink-0 rounded-lg border border-ink-700 object-cover sm:w-32"
+        />
+        <div
+          v-else
+          class="flex aspect-[2/3] w-28 shrink-0 items-center justify-center rounded-lg border border-dashed border-ink-700 bg-ink-850 text-xs font-medium uppercase tracking-wider text-slate-500 sm:w-32"
+        >
+          N/A
+        </div>
+
+        <div class="flex min-w-0 flex-1 flex-col gap-2.5">
+          <div class="space-y-1">
             <div class="flex items-start justify-between gap-2">
-              <h2 class="text-sm font-semibold leading-snug text-slate-100">
+              <h2 class="text-base font-semibold leading-snug text-strong">
                 {{ novel.title_translated || novel.title }}
               </h2>
               <span
@@ -262,60 +263,60 @@ onMounted(load)
               </span>
             </div>
 
-            <p class="text-xs text-slate-400">
-              {{ novel.author || t('library.unknownAuthor') }}
-            </p>
+            <div class="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-400">
+              <span>{{ novel.author || t('library.unknownAuthor') }}</span>
+              <span class="text-slate-600">·</span>
+              <span class="font-mono text-[11px] text-slate-500">
+                {{ novel.source_lang }} → {{ novel.target_lang }}
+                <template v-if="novel.scraper_name"> · {{ novel.scraper_name }}</template>
+              </span>
+            </div>
           </div>
-        </div>
 
-        <p
-          v-if="novel.synopsis_translated || novel.synopsis"
-          class="line-clamp-2 text-[11px] leading-relaxed text-slate-500"
-        >
-          {{ novel.synopsis_translated || novel.synopsis }}
-        </p>
-
-        <p class="font-mono text-[11px] text-slate-500">
-          {{ novel.source_lang }} → {{ novel.target_lang }}
-          <span v-if="novel.scraper_name"> · {{ novel.scraper_name }}</span>
-        </p>
-
-        <div class="flex flex-wrap gap-1.5 text-[11px]">
-          <span class="badge bg-ink-800 text-slate-300">{{
-            t('common.units.chapters', { count: novel.chapter_count })
-          }}</span>
-          <span class="badge bg-emerald-950/50 text-emerald-400">{{
-            t('library.rawCount', { count: novel.raw_count })
-          }}</span>
-          <span class="badge bg-sky-950/50 text-sky-400">
-            {{ t('library.translatedCount', { count: novel.translated_count }) }}
-          </span>
-          <span v-if="novel.pending_count" class="badge bg-amber-950/50 text-amber-400">
-            {{ t('library.pendingCount', { count: novel.pending_count }) }}
-          </span>
-        </div>
-
-        <div class="mt-auto flex flex-wrap items-center gap-2 pt-1">
-          <button
-            class="btn-primary !px-2.5 !py-1 text-xs"
-            :disabled="!novel.translated_count"
-            :title="
-              novel.translated_count ? t('library.openReader') : t('library.noTranslatedChapters')
-            "
-            @click="openReader(novel)"
+          <p
+            v-if="novel.synopsis_translated || novel.synopsis"
+            class="line-clamp-3 text-xs leading-relaxed text-slate-500"
           >
-            {{ novel.last_read_chapter_id ? t('library.continueReading') : t('library.read') }}
-          </button>
-          <button class="btn-ghost !px-2.5 !py-1 text-xs" @click="openWorkspace(novel)">
-            {{ t('library.workspace') }}
-          </button>
-          <button
-            class="btn-danger ml-auto !px-2.5 !py-1 text-xs"
-            :disabled="deletingId === novel.id"
-            @click="remove(novel)"
-          >
-            {{ t('common.actions.delete') }}
-          </button>
+            {{ novel.synopsis_translated || novel.synopsis }}
+          </p>
+
+          <div class="flex flex-wrap gap-1.5 text-[11px]">
+            <span class="badge bg-ink-800 text-slate-300">{{
+              t('common.units.chapters', { count: novel.chapter_count })
+            }}</span>
+            <span class="badge bg-emerald-950/50 text-emerald-400">{{
+              t('library.rawCount', { count: novel.raw_count })
+            }}</span>
+            <span class="badge bg-sky-950/50 text-sky-400">
+              {{ t('library.translatedCount', { count: novel.translated_count }) }}
+            </span>
+            <span v-if="novel.pending_count" class="badge bg-amber-950/50 text-amber-400">
+              {{ t('library.pendingCount', { count: novel.pending_count }) }}
+            </span>
+          </div>
+
+          <div class="mt-auto flex flex-wrap items-center gap-2 pt-1">
+            <button
+              class="btn-primary !px-2.5 !py-1 text-xs"
+              :disabled="!novel.translated_count"
+              :title="
+                novel.translated_count ? t('library.openReader') : t('library.noTranslatedChapters')
+              "
+              @click="openReader(novel)"
+            >
+              {{ novel.last_read_chapter_id ? t('library.continueReading') : t('library.read') }}
+            </button>
+            <button class="btn-ghost !px-2.5 !py-1 text-xs" @click="openWorkspace(novel)">
+              {{ t('library.workspace') }}
+            </button>
+            <button
+              class="btn-danger ml-auto !px-2.5 !py-1 text-xs"
+              :disabled="deletingId === novel.id"
+              @click="remove(novel)"
+            >
+              {{ t('common.actions.delete') }}
+            </button>
+          </div>
         </div>
       </article>
     </div>
