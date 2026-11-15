@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 import database
 from core import job_runner
+from core.cover_prompt import CoverPromptError, generate_cover_prompt
 from core.reference import load_reference, save_reference
 from llm.base import TaskNotConfiguredError, TaskRouter
 
@@ -53,6 +54,12 @@ class AnalyzePayload(BaseModel):
 class TranslatePayload(BaseModel):
     chapter_ids: list[int] = Field(default_factory=list)
     auto_update_reference: bool = True
+
+
+class CoverPromptPayload(BaseModel):
+    style: str = "webnovel_cover"
+    mood: str = ""
+    extra_notes: str = ""
 
 
 # --------------------------------------------------------------------------
@@ -155,6 +162,24 @@ async def apply_reference(
             detail="Belum ada bab yang sudah diterjemahkan untuk diperbarui.",
         )
     return await job_runner.start_job("apply_reference", novel_id, chapter_ids)
+
+
+@router.post("/novels/{novel_id}/cover-prompt")
+async def create_cover_prompt(
+    novel_id: int, payload: CoverPromptPayload | None = None
+) -> dict[str, Any]:
+    _require_novel(novel_id)
+    _require_task("story_analysis")
+    opts = payload or CoverPromptPayload()
+    try:
+        return await generate_cover_prompt(
+            novel_id,
+            style=opts.style,
+            mood=opts.mood,
+            extra_notes=opts.extra_notes,
+        )
+    except CoverPromptError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.post("/novels/{novel_id}/translate", status_code=202)

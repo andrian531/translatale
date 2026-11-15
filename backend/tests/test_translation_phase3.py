@@ -853,3 +853,31 @@ def test_analyze_falls_back_to_secondary_model_on_refusal(client, stub_llm, monk
     stub_llm.handler = handler
     result = asyncio.run(analyze_novel(novel["id"]))
     assert result["counts"]["characters"] == 1
+
+
+def test_cover_prompt_returns_text_negative_and_json_prompt(client, stub_llm):
+    novel = _create_novel(client)
+    stub_llm.handler = lambda prompt, system: json.dumps(
+        {
+            "positive_prompt": "A young cultivator in flowing azure robes on a misty cliff",
+            "negative_prompt": "text, watermark, blurry, bad anatomy",
+            "json_prompt": {
+                "title_concept": "Azure Peak",
+                "art_style": "xianxia fantasy",
+                "aspect_ratio": "2:3",
+                "subject": "Lin Feng",
+                "negative_prompt": "text, watermark, blurry",
+            },
+        }
+    )
+
+    resp = client.post(
+        f"/api/novels/{novel['id']}/cover-prompt",
+        json={"style": "xianxia_ink", "mood": "epic", "extra_notes": "jade sword"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert "azure robes" in body["positive_prompt"]
+    assert "watermark" in body["negative_prompt"]
+    assert body["json_prompt"]["aspect_ratio"] == "2:3"
+    assert body["json_prompt"]["subject"] == "Lin Feng"

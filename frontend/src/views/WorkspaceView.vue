@@ -839,6 +839,83 @@ async function applyReferenceToTranslated() {
   }
 }
 
+// -- cover & cover prompt -----------------------------------------------
+const coverInput = ref(null)
+const uploadingCover = ref(false)
+const showCoverPromptModal = ref(false)
+const generatingCoverPrompt = ref(false)
+const coverPromptResult = ref(null)
+const copiedPromptKey = ref('')
+const coverPromptForm = reactive({
+  style: 'webnovel_cover',
+  mood: '',
+  extra_notes: '',
+})
+
+function pickCover() {
+  coverInput.value?.click()
+}
+
+async function onCoverChosen(event) {
+  const file = event.target.files?.[0]
+  if (!file) return
+  uploadingCover.value = true
+  try {
+    novel.value = await novelsApi.uploadCover(novelId.value, file)
+    flash('success', t('workspace.cover.uploaded'))
+  } catch (err) {
+    flash('error', t('workspace.cover.uploadFailed', { message: err.message }))
+  } finally {
+    uploadingCover.value = false
+    event.target.value = ''
+  }
+}
+
+async function removeCover() {
+  if (!window.confirm(t('workspace.confirm.removeCover'))) return
+  uploadingCover.value = true
+  try {
+    novel.value = await novelsApi.deleteCover(novelId.value)
+    flash('success', t('workspace.cover.removed'))
+  } catch (err) {
+    flash('error', t('workspace.cover.uploadFailed', { message: err.message }))
+  } finally {
+    uploadingCover.value = false
+  }
+}
+
+function openCoverPromptModal() {
+  showCoverPromptModal.value = true
+}
+
+async function runGenerateCoverPrompt() {
+  generatingCoverPrompt.value = true
+  try {
+    coverPromptResult.value = await translationApi.generateCoverPrompt(novelId.value, {
+      style: coverPromptForm.style,
+      mood: coverPromptForm.mood,
+      extra_notes: coverPromptForm.extra_notes,
+    })
+  } catch (err) {
+    flash('error', t('workspace.coverPrompt.generateFailed', { message: err.message }))
+  } finally {
+    generatingCoverPrompt.value = false
+  }
+}
+
+async function copyPromptText(key, text) {
+  if (!text) return
+  try {
+    await navigator.clipboard.writeText(text)
+    copiedPromptKey.value = key
+    window.setTimeout(() => {
+      if (copiedPromptKey.value === key) copiedPromptKey.value = ''
+    }, 2000)
+  } catch {
+    // Clipboard unavailable
+  }
+}
+
 watch(novelId, async () => {
   stopStream()
   job.value = null
@@ -875,28 +952,84 @@ onBeforeUnmount(stopStream)
 
     <template v-else-if="novel">
       <header class="mb-5">
-        <div class="flex flex-wrap items-start justify-between gap-3">
-          <div class="min-w-0 flex-1">
-            <h1 class="text-2xl font-semibold tracking-tight text-strong">
-              {{ novel.title_translated || novel.title }}
-            </h1>
-            <p class="mt-1 text-sm text-slate-400">
-              {{ novel.author || t('workspace.unknownAuthor') }} ·
-              <span class="font-mono text-xs">{{ novel.source_lang }} → {{ novel.target_lang }}</span>
-            </p>
-            <div
-              class="mt-2 rounded-lg border border-ink-800/80 bg-ink-900/50 px-3 py-2 text-[11px] text-slate-400"
-            >
-              <span class="font-semibold uppercase tracking-wider text-slate-500">
-                {{ t('workspace.source') }}
-              </span>
-              <span class="ml-1.5 text-slate-300">{{ novel.title }}</span>
-              <span v-if="novel.scraper_name" class="ml-2 font-mono text-slate-500">
-                ({{ novel.scraper_name }})
-              </span>
-              <p v-if="novel.source_url" class="mt-0.5 truncate font-mono text-slate-500">
-                {{ novel.source_url }}
+        <div class="flex flex-wrap items-start justify-between gap-4">
+          <div class="flex min-w-0 flex-1 items-start gap-4">
+            <div class="shrink-0">
+              <img
+                v-if="novel.cover_url"
+                :src="novel.cover_url"
+                :alt="novel.title_translated || novel.title"
+                class="aspect-[2/3] w-20 rounded-lg border border-ink-700 object-cover shadow"
+              />
+              <div
+                v-else
+                class="grid aspect-[2/3] w-20 place-items-center rounded-lg border border-dashed border-ink-700 bg-ink-900/40 px-1 text-center text-[10px] text-slate-500"
+              >
+                {{ t('workspace.cover.noCover') }}
+              </div>
+              <input
+                ref="coverInput"
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                class="hidden"
+                @change="onCoverChosen"
+              />
+              <div class="mt-1.5 flex flex-col gap-1">
+                <button
+                  type="button"
+                  class="btn-ghost !px-2 !py-0.5 text-[10px]"
+                  :disabled="uploadingCover"
+                  @click="pickCover"
+                >
+                  {{
+                    uploadingCover
+                      ? t('workspace.cover.uploading')
+                      : novel.cover_url
+                        ? t('workspace.cover.changeCover')
+                        : t('workspace.cover.setCover')
+                  }}
+                </button>
+                <button
+                  v-if="novel.cover_url"
+                  type="button"
+                  class="btn-danger !px-2 !py-0.5 text-[10px]"
+                  :disabled="uploadingCover"
+                  @click="removeCover"
+                >
+                  {{ t('workspace.cover.removeCover') }}
+                </button>
+                <button
+                  type="button"
+                  class="btn-ghost !px-2 !py-0.5 text-[10px] text-indigo-300"
+                  @click="openCoverPromptModal"
+                >
+                  {{ t('workspace.coverPrompt.button') }}
+                </button>
+              </div>
+            </div>
+
+            <div class="min-w-0 flex-1">
+              <h1 class="text-2xl font-semibold tracking-tight text-strong">
+                {{ novel.title_translated || novel.title }}
+              </h1>
+              <p class="mt-1 text-sm text-slate-400">
+                {{ novel.author || t('workspace.unknownAuthor') }} ·
+                <span class="font-mono text-xs">{{ novel.source_lang }} → {{ novel.target_lang }}</span>
               </p>
+              <div
+                class="mt-2 rounded-lg border border-ink-800/80 bg-ink-900/50 px-3 py-2 text-[11px] text-slate-400"
+              >
+                <span class="font-semibold uppercase tracking-wider text-slate-500">
+                  {{ t('workspace.source') }}
+                </span>
+                <span class="ml-1.5 text-slate-300">{{ novel.title }}</span>
+                <span v-if="novel.scraper_name" class="ml-2 font-mono text-slate-500">
+                  ({{ novel.scraper_name }})
+                </span>
+                <p v-if="novel.source_url" class="mt-0.5 truncate font-mono text-slate-500">
+                  {{ novel.source_url }}
+                </p>
+              </div>
             </div>
           </div>
           <div class="flex flex-wrap gap-1.5 text-[11px]">
@@ -2169,6 +2302,153 @@ onBeforeUnmount(stopStream)
             @click="confirmTranslateAnyway"
           >
             {{ t('workspace.contextWarning.translateAnyway') }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===================== cover prompt generator modal ===================== -->
+    <div
+      v-if="showCoverPromptModal"
+      class="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-black/70 p-4 py-10"
+      @click.self="showCoverPromptModal = false"
+    >
+      <div class="w-full max-w-3xl space-y-4 rounded-xl border border-ink-700 bg-ink-900 p-5 shadow-2xl">
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <h2 class="text-sm font-semibold text-strong">
+              {{ t('workspace.coverPrompt.title') }}
+            </h2>
+            <p class="mt-1 text-xs text-slate-500">
+              {{ t('workspace.coverPrompt.subtitle') }}
+            </p>
+          </div>
+          <button type="button" class="btn-ghost !px-2.5 !py-1 text-xs" @click="showCoverPromptModal = false">
+            ✕
+          </button>
+        </div>
+
+        <form class="grid gap-3 sm:grid-cols-2" @submit.prevent="runGenerateCoverPrompt">
+          <div>
+            <label class="label" for="cover-style">{{ t('workspace.coverPrompt.style') }}</label>
+            <select id="cover-style" v-model="coverPromptForm.style" class="input text-xs">
+              <option value="webnovel_cover">{{ t('workspace.coverPrompt.styles.webnovel_cover') }}</option>
+              <option value="anime_illustration">{{ t('workspace.coverPrompt.styles.anime_illustration') }}</option>
+              <option value="xianxia_ink">{{ t('workspace.coverPrompt.styles.xianxia_ink') }}</option>
+              <option value="dark_fantasy">{{ t('workspace.coverPrompt.styles.dark_fantasy') }}</option>
+              <option value="semi_realistic">{{ t('workspace.coverPrompt.styles.semi_realistic') }}</option>
+            </select>
+          </div>
+          <div>
+            <label class="label" for="cover-mood">{{ t('workspace.coverPrompt.mood') }}</label>
+            <input
+              id="cover-mood"
+              v-model="coverPromptForm.mood"
+              class="input text-xs"
+              :placeholder="t('workspace.coverPrompt.moodPlaceholder')"
+            />
+          </div>
+          <div class="sm:col-span-2">
+            <label class="label" for="cover-extra">{{ t('workspace.coverPrompt.extraNotes') }}</label>
+            <input
+              id="cover-extra"
+              v-model="coverPromptForm.extra_notes"
+              class="input text-xs"
+              :placeholder="t('workspace.coverPrompt.extraPlaceholder')"
+            />
+          </div>
+          <div class="flex justify-end sm:col-span-2">
+            <button type="submit" class="btn-primary text-xs" :disabled="generatingCoverPrompt">
+              {{
+                generatingCoverPrompt
+                  ? t('workspace.coverPrompt.generating')
+                  : t('workspace.coverPrompt.generate')
+              }}
+            </button>
+          </div>
+        </form>
+
+        <div v-if="coverPromptResult" class="space-y-4 border-t border-ink-800 pt-4">
+          <!-- Format 1: Text + Negative Prompt -->
+          <div class="space-y-2 rounded-lg border border-ink-800 bg-ink-950/50 p-3">
+            <h3 class="text-xs font-semibold text-strong">
+              {{ t('workspace.coverPrompt.textFormatTitle') }}
+            </h3>
+            <div>
+              <div class="mb-1 flex items-center justify-between">
+                <span class="text-[11px] font-medium text-slate-400">
+                  {{ t('workspace.coverPrompt.positiveLabel') }}
+                </span>
+                <button
+                  type="button"
+                  class="btn-ghost !px-2 !py-0.5 text-[11px]"
+                  @click="copyPromptText('positive', coverPromptResult.positive_prompt)"
+                >
+                  {{
+                    copiedPromptKey === 'positive'
+                      ? t('workspace.coverPrompt.copied')
+                      : t('workspace.coverPrompt.copy')
+                  }}
+                </button>
+              </div>
+              <textarea
+                :value="coverPromptResult.positive_prompt"
+                readonly
+                class="input h-28 resize-y text-xs leading-relaxed"
+              />
+            </div>
+            <div>
+              <div class="mb-1 flex items-center justify-between">
+                <span class="text-[11px] font-medium text-slate-400">
+                  {{ t('workspace.coverPrompt.negativeLabel') }}
+                </span>
+                <button
+                  type="button"
+                  class="btn-ghost !px-2 !py-0.5 text-[11px]"
+                  @click="copyPromptText('negative', coverPromptResult.negative_prompt)"
+                >
+                  {{
+                    copiedPromptKey === 'negative'
+                      ? t('workspace.coverPrompt.copied')
+                      : t('workspace.coverPrompt.copy')
+                  }}
+                </button>
+              </div>
+              <textarea
+                :value="coverPromptResult.negative_prompt"
+                readonly
+                class="input h-16 resize-y text-xs leading-relaxed"
+              />
+            </div>
+          </div>
+
+          <!-- Format 2: Structured JSON Prompt -->
+          <div class="space-y-2 rounded-lg border border-ink-800 bg-ink-950/50 p-3">
+            <div class="flex items-center justify-between">
+              <h3 class="text-xs font-semibold text-strong">
+                {{ t('workspace.coverPrompt.jsonFormatTitle') }}
+              </h3>
+              <button
+                type="button"
+                class="btn-ghost !px-2 !py-0.5 text-[11px]"
+                @click="
+                  copyPromptText('json', JSON.stringify(coverPromptResult.json_prompt, null, 2))
+                "
+              >
+                {{
+                  copiedPromptKey === 'json'
+                    ? t('workspace.coverPrompt.copied')
+                    : t('workspace.coverPrompt.copy')
+                }}
+              </button>
+            </div>
+            <pre class="max-h-64 overflow-auto rounded-lg border border-ink-800 bg-ink-900 p-3 font-mono text-[11px] text-slate-300">{{ JSON.stringify(coverPromptResult.json_prompt, null, 2) }}</pre>
+          </div>
+        </div>
+
+        <div class="flex justify-end">
+          <button type="button" class="btn-ghost text-xs" @click="showCoverPromptModal = false">
+            {{ t('workspace.coverPrompt.close') }}
           </button>
         </div>
       </div>

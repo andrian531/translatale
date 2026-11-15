@@ -509,3 +509,35 @@ def test_clear_chapter_translations_rejects_empty_list(client):
         json={"chapter_ids": []},
     )
     assert resp.status_code == 422
+
+
+def test_upload_get_and_delete_novel_cover(client):
+    novel = client.post("/api/novels", json={"title": "Cover Novel"}).json()
+    assert novel["cover_url"] == ""
+
+    # Rejects non-image extension
+    bad = client.post(
+        f"/api/novels/{novel['id']}/cover",
+        files={"file": ("note.txt", b"hello", "text/plain")},
+    )
+    assert bad.status_code == 422
+
+    # Upload valid PNG bytes
+    png_bytes = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
+    up = client.post(
+        f"/api/novels/{novel['id']}/cover",
+        files={"file": ("cover.png", png_bytes, "image/png")},
+    )
+    assert up.status_code == 200, up.text
+    assert up.json()["cover_url"].startswith(f"/api/novels/{novel['id']}/cover")
+
+    # Fetch cover image
+    fetched = client.get(f"/api/novels/{novel['id']}/cover")
+    assert fetched.status_code == 200
+    assert fetched.content == png_bytes
+
+    # Delete cover
+    deleted = client.delete(f"/api/novels/{novel['id']}/cover")
+    assert deleted.status_code == 200
+    assert deleted.json()["cover_url"] == ""
+    assert client.get(f"/api/novels/{novel['id']}/cover").status_code == 404

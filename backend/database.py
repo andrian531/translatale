@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS novels (
     scraper_name     TEXT    NOT NULL DEFAULT '',
     synopsis         TEXT    NOT NULL DEFAULT '',
     synopsis_translated TEXT NOT NULL DEFAULT '',
+    cover_path       TEXT    NOT NULL DEFAULT '',
     created_at       TEXT    NOT NULL,
     updated_at       TEXT    NOT NULL
 );
@@ -151,6 +152,7 @@ def get_conn(db_path: Path | str | None = None) -> Iterator[sqlite3.Connection]:
 COLUMN_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("provider_configs", "available_models", "TEXT NOT NULL DEFAULT '[]'"),
     ("novels", "synopsis_translated", "TEXT NOT NULL DEFAULT ''"),
+    ("novels", "cover_path", "TEXT NOT NULL DEFAULT ''"),
     ("task_models", "fallback_provider_id", "INTEGER REFERENCES provider_configs(id) ON DELETE SET NULL"),
     ("task_models", "fallback_model_name", "TEXT NOT NULL DEFAULT ''"),
 )

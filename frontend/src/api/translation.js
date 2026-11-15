@@ -12,6 +12,11 @@ export const translationApi = {
       method: 'POST',
       body: JSON.stringify({ chapter_ids: chapterIds?.length ? chapterIds : null }),
     }),
+  generateCoverPrompt: (novelId, payload = {}) =>
+    request(`/novels/${novelId}/cover-prompt`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
 
   startAnalyze: (novelId, chapterIds) =>
     request(`/novels/${novelId}/analyze`, {

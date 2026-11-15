@@ -228,29 +228,39 @@ onMounted(load)
         :key="novel.id"
         class="card flex flex-col gap-3 transition-colors hover:border-ink-600"
       >
-        <div class="flex items-start justify-between gap-2">
-          <h2 class="text-sm font-semibold leading-snug text-slate-100">
-            {{ novel.title_translated || novel.title }}
-          </h2>
-          <span
-            class="badge shrink-0"
-            :class="
-              novel.source_type === 'scraper'
-                ? 'bg-indigo-950/70 text-indigo-300'
-                : 'bg-ink-800 text-slate-400'
-            "
-          >
-            {{
-              novel.source_type === 'scraper'
-                ? t('library.sourceScraper')
-                : t('library.sourceManual')
-            }}
-          </span>
-        </div>
+        <div class="flex items-start gap-3">
+          <img
+            v-if="novel.cover_url"
+            :src="novel.cover_url"
+            :alt="novel.title_translated || novel.title"
+            class="aspect-[2/3] w-14 shrink-0 rounded-lg border border-ink-700 object-cover"
+          />
+          <div class="min-w-0 flex-1 space-y-1">
+            <div class="flex items-start justify-between gap-2">
+              <h2 class="text-sm font-semibold leading-snug text-slate-100">
+                {{ novel.title_translated || novel.title }}
+              </h2>
+              <span
+                class="badge shrink-0"
+                :class="
+                  novel.source_type === 'scraper'
+                    ? 'bg-indigo-950/70 text-indigo-300'
+                    : 'bg-ink-800 text-slate-400'
+                "
+              >
+                {{
+                  novel.source_type === 'scraper'
+                    ? t('library.sourceScraper')
+                    : t('library.sourceManual')
+                }}
+              </span>
+            </div>
 
-        <p class="text-xs text-slate-400">
-          {{ novel.author || t('library.unknownAuthor') }}
-        </p>
+            <p class="text-xs text-slate-400">
+              {{ novel.author || t('library.unknownAuthor') }}
+            </p>
+          </div>
+        </div>
 
         <p
           v-if="novel.synopsis_translated || novel.synopsis"

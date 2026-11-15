@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 import re
 import sqlite3
 from typing import Any, Literal
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, field_validator
 
 import database
@@ -129,6 +131,7 @@ class NovelOut(BaseModel):
     scraper_name: str
     synopsis: str
     synopsis_translated: str = ""
+    cover_url: str = ""
     created_at: str
     updated_at: str
     chapter_count: int = 0
@@ -179,7 +182,12 @@ FROM novels AS n
 
 
 def _novel_out(row: sqlite3.Row) -> NovelOut:
-    return NovelOut(**{key: row[key] for key in row.keys()})
+    data = {key: row[key] for key in row.keys()}
+    cover_path = data.pop("cover_path", "") or ""
+    data["cover_url"] = (
+        f"/api/novels/{data['id']}/cover?v={data['updated_at']}" if cover_path else ""
+    )
+    return NovelOut(**data)
 
 
 def _chapter_out(row: sqlite3.Row) -> ChapterOut:
@@ -356,9 +364,11 @@ def update_novel(novel_id: int, payload: NovelUpdate) -> NovelOut:
 @router.delete("/novels/{novel_id}")
 def delete_novel(novel_id: int) -> dict[str, Any]:
     with database.get_conn() as conn:
-        _get_novel(conn, novel_id)
+        row = _get_novel(conn, novel_id)
+        cover_path = row["cover_path"] if "cover_path" in row.keys() else ""
         conn.execute("DELETE FROM chapters WHERE novel_id = ?", (novel_id,))
         conn.execute("DELETE FROM novels WHERE id = ?", (novel_id,))
+    _remove_cover_file(cover_path)
     return {"ok": True, "deleted_id": novel_id}
 
 
@@ -809,6 +819,90 @@ def clear_chapter_translations(novel_id: int, req: FetchRequest) -> dict:
         )
         conn.commit()
     return {"ok": True, "cleared": cur.rowcount}
+
+
+MAX_COVER_BYTES = 5 * 1024 * 1024
+ALLOWED_COVER_EXTS = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+}
+
+
+def _covers_dir() -> Path:
+    path = database.get_db_path().parent / "covers"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _remove_cover_file(cover_path: str) -> None:
+    if not cover_path:
+        return
+    target = Path(cover_path)
+    if target.is_file():
+        target.unlink(missing_ok=True)
+
+
+@router.post("/novels/{novel_id}/cover", response_model=NovelOut)
+async def upload_novel_cover(novel_id: int, file: UploadFile = File(...)) -> NovelOut:
+    with database.get_conn() as conn:
+        row = _get_novel(conn, novel_id)
+        old_cover = row["cover_path"] if "cover_path" in row.keys() else ""
+
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in ALLOWED_COVER_EXTS:
+        ct = (file.content_type or "").lower()
+        ext_map = {v: k for k, v in ALLOWED_COVER_EXTS.items() if k != ".jpeg"}
+        suffix = ext_map.get(ct, "")
+    if suffix not in ALLOWED_COVER_EXTS:
+        raise HTTPException(
+            status_code=422, detail="Format cover harus PNG, JPG, atau WebP."
+        )
+
+    payload = await file.read()
+    if not payload or len(payload) > MAX_COVER_BYTES:
+        raise HTTPException(
+            status_code=422, detail="Ukuran gambar cover maksimal 5 MB."
+        )
+
+    dest = _covers_dir() / f"novel_{novel_id}{suffix}"
+    if old_cover and Path(old_cover) != dest:
+        _remove_cover_file(old_cover)
+    dest.write_bytes(payload)
+
+    now = database.utcnow()
+    with database.get_conn() as conn:
+        conn.execute(
+            "UPDATE novels SET cover_path = ?, updated_at = ? WHERE id = ?",
+            (str(dest), now, novel_id),
+        )
+        return _novel_out(_get_novel(conn, novel_id))
+
+
+@router.get("/novels/{novel_id}/cover")
+def get_novel_cover(novel_id: int) -> FileResponse:
+    with database.get_conn() as conn:
+        row = _get_novel(conn, novel_id)
+    cover_path = row["cover_path"] if "cover_path" in row.keys() else ""
+    if not cover_path or not Path(cover_path).is_file():
+        raise HTTPException(status_code=404, detail="Cover belum diatur")
+    suffix = Path(cover_path).suffix.lower()
+    media_type = ALLOWED_COVER_EXTS.get(suffix, "image/png")
+    return FileResponse(cover_path, media_type=media_type)
+
+
+@router.delete("/novels/{novel_id}/cover", response_model=NovelOut)
+def delete_novel_cover(novel_id: int) -> NovelOut:
+    with database.get_conn() as conn:
+        row = _get_novel(conn, novel_id)
+        cover_path = row["cover_path"] if "cover_path" in row.keys() else ""
+        _remove_cover_file(cover_path)
+        conn.execute(
+            "UPDATE novels SET cover_path = '', updated_at = ? WHERE id = ?",
+            (database.utcnow(), novel_id),
+        )
+        return _novel_out(_get_novel(conn, novel_id))
 
 
 @router.get("/chapters/{chapter_id}", response_model=ChapterOut)
