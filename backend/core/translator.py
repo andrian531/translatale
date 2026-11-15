@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 TASK_NAME = "translate"
 
-CHUNK_MAX_CHARS = 3000
+CHUNK_MAX_CHARS = 4500
 ROLLING_CONTEXT_CHARS = 300
 CHUNK_MAX_RETRIES = 3
 CHUNK_RETRY_DELAY = 1.0
@@ -267,6 +267,10 @@ async def translate_chapter(
     title_translated = chapter.get("title_translated") or ""
     title = (chapter.get("title") or "").strip()
     if title:
+        await _emit(
+            on_progress,
+            {"type": "title", "chapter_id": chapter_id},
+        )
         try:
             title_response = await resolved.provider.generate(
                 prompt=TITLE_PROMPT.format(target=_lang_name(target_lang), title=title),

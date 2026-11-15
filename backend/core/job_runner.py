@@ -541,6 +541,36 @@ async def _safe_update_reference(chapter_id: int, db_path: str | None) -> dict[s
         return {"characters_added": 0, "locations_added": 0, "terms_added": 0}
 
 
+def cleanup_orphaned_jobs(db_path: str | None = None) -> None:
+    """Mark leftover running/queued jobs as failed after a server restart."""
+    now = database.utcnow()
+    with database.get_conn(db_path) as conn:
+        conn.execute(
+            """
+            UPDATE translation_jobs
+               SET status = 'failed',
+                   message = 'Gagal',
+                   error = 'Server di-restart saat job sedang berjalan',
+                   updated_at = ?
+             WHERE status IN ('queued', 'running')
+            """,
+            (now,),
+        )
+        conn.execute(
+            """
+            UPDATE chapters
+               SET status = CASE
+                     WHEN TRIM(COALESCE(translated_content, '')) <> '' THEN 'translated'
+                     WHEN TRIM(COALESCE(raw_content, '')) <> '' THEN 'raw'
+                     ELSE 'pending_fetch'
+                   END,
+                   updated_at = ?
+             WHERE status = 'translating'
+            """,
+            (now,),
+        )
+
+
 async def _run_translate(
     state: JobState,
     novel_id: int,
@@ -575,10 +605,25 @@ async def _run_translate(
             continue
 
         chapter = dict(row)
+        label = _fmt_number(chapter["chapter_number"])
 
         # Pick up characters/terms that first appear in this chapter *before*
         # translating it, so they are already in this chapter's prompt.
         if auto_update_reference:
+            ref_msg = f"Bab {label}: menganalisa referensi baru ({completed}/{total})…"
+            logger.info("[Job %s] %s", job_id, ref_msg)
+            _update_job(job_id, current_chapter_id=chapter_id, message=ref_msg)
+            _publish(
+                job_id,
+                {
+                    "type": "progress",
+                    "chapter_id": chapter_id,
+                    "chapter_number": chapter["chapter_number"],
+                    "completed_items": completed,
+                    "total_items": total,
+                    "message": ref_msg,
+                },
+            )
             added = await _safe_update_reference(chapter_id, db_path)
             if any(added.values()):
                 _publish(
@@ -590,13 +635,15 @@ async def _run_translate(
                         "chapter_title": chapter["title"],
                         "added": added,
                         "message": (
-                            f"Bab {_fmt_number(chapter['chapter_number'])}: "
+                            f"Bab {label}: "
                             f"{_describe_added(added)} baru ditemukan"
                         ),
                     },
                 )
 
-        _update_job(job_id, current_chapter_id=chapter_id)
+        tl_msg = f"Menerjemahkan Bab {label}: {chapter['title']} ({completed}/{total})"
+        logger.info("[Job %s] %s", job_id, tl_msg)
+        _update_job(job_id, current_chapter_id=chapter_id, message=tl_msg)
         with database.get_conn(db_path) as conn:
             conn.execute(
                 "UPDATE chapters SET status = 'translating', updated_at = ? WHERE id = ?",
@@ -609,21 +656,33 @@ async def _run_translate(
                 "chapter_id": chapter_id,
                 "chapter_number": chapter["chapter_number"],
                 "chapter_title": chapter["title"],
-                "message": f"Menerjemahkan bab {_fmt_number(chapter['chapter_number'])}: {chapter['title']}",
+                "completed_items": completed,
+                "total_items": total,
+                "message": tl_msg,
             },
         )
 
-        async def on_progress(payload: dict[str, Any], _chapter=chapter) -> None:
+        async def on_progress(payload: dict[str, Any], _chapter=chapter, _label=label) -> None:
+            ptype = payload.get("type")
+            if ptype == "title":
+                msg = f"Bab {_label} — menerjemahkan judul…"
+            else:
+                msg = (
+                    f"Bab {_label} — chunk "
+                    f"{payload.get('chunk_index')}/{payload.get('chunk_total')} "
+                    f"({payload.get('chunk_chars', 0)} kar)"
+                )
+            logger.info("[Job %s] %s", job_id, msg)
+            _update_job(job_id, message=msg)
             _publish(
                 job_id,
                 {
                     **payload,
                     "chapter_number": _chapter["chapter_number"],
                     "chapter_title": _chapter["title"],
-                    "message": (
-                        f"Bab {_fmt_number(_chapter['chapter_number'])} — chunk "
-                        f"{payload.get('chunk_index')}/{payload.get('chunk_total')}"
-                    ),
+                    "completed_items": completed,
+                    "total_items": total,
+                    "message": msg,
                 },
             )
 
@@ -650,7 +709,12 @@ async def _run_translate(
             ) from exc
 
         completed += 1
-        _update_job(job_id, completed_items=completed)
+        done_msg = (
+            f"Bab {label} selesai ({completed}/{total}) — "
+            f"skor {result['quality']['score']} ({result['quality']['grade']})"
+        )
+        logger.info("[Job %s] %s", job_id, done_msg)
+        _update_job(job_id, completed_items=completed, message=done_msg)
         _publish(
             job_id,
             {
@@ -664,10 +728,7 @@ async def _run_translate(
                 "chunks": result["chunks"],
                 "completed_items": completed,
                 "total_items": total,
-                "message": (
-                    f"Bab {_fmt_number(chapter['chapter_number'])} selesai — "
-                    f"skor {result['quality']['score']} ({result['quality']['grade']})"
-                ),
+                "message": done_msg,
             },
         )
 

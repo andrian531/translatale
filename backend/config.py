@@ -97,7 +97,7 @@ SCRAPER_SETTINGS_LIMITS: dict[str, tuple[float, float]] = {
     "fetch_max_consecutive_errors": (1, 20),
 }
 
-HTTP_TIMEOUT = 60.0
+HTTP_TIMEOUT = 180.0
 
 
 def get_db_path() -> Path:

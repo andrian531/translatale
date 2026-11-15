@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 import config
 import database
+from core import job_runner
 from routers import projects, reader, scrapers, settings, translation
 
 __version__ = "0.1.0"
@@ -25,6 +26,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Create the data directory and initialise the SQLite schema."""
     config.ensure_data_dir()
     database.init_db()
+    job_runner.cleanup_orphaned_jobs()
     yield
 
 

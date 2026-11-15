@@ -1018,8 +1018,22 @@ watch(novelId, async () => {
   await Promise.all([load(), loadReference()])
 })
 
+async function resumeActiveJob() {
+  try {
+    const jobs = await translationApi.listJobs(novelId.value)
+    const active = jobs.find((item) => item.status === 'running' || item.status === 'queued')
+    if (active) {
+      job.value = active
+      jobMessage.value = active.message || ''
+      watchJob(active.id)
+    }
+  } catch {
+    // Non-fatal if job history cannot be queried
+  }
+}
+
 onMounted(async () => {
-  await Promise.all([load(), loadReference()])
+  await Promise.all([load(), loadReference(), resumeActiveJob()])
   try {
     const scraper = await settingsApi.getScraperSettings()
     fetchBatchSize.value = scraper.fetch_batch_size ?? 50
