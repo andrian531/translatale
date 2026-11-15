@@ -274,7 +274,7 @@ onBeforeUnmount(() => {
         </button>
 
         <span class="truncate text-sm font-medium">
-          {{ novel?.title || 'Reader' }}
+          {{ novel?.title_translated || novel?.title || 'Reader' }}
         </span>
 
         <div class="ml-auto flex flex-wrap items-center gap-1">

@@ -647,15 +647,26 @@ onBeforeUnmount(stopStream)
     <template v-else-if="novel">
       <header class="mb-5">
         <div class="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h1 class="text-2xl font-semibold tracking-tight text-white">{{ novel.title }}</h1>
+          <div class="min-w-0 flex-1">
+            <h1 class="text-2xl font-semibold tracking-tight text-white">
+              {{ novel.title_translated || novel.title }}
+            </h1>
             <p class="mt-1 text-sm text-slate-400">
               {{ novel.author || 'Penulis tidak diketahui' }} ·
               <span class="font-mono text-xs">{{ novel.source_lang }} → {{ novel.target_lang }}</span>
             </p>
-            <p v-if="novel.source_url" class="mt-1 truncate font-mono text-[11px] text-slate-500">
-              {{ novel.source_url }}
-            </p>
+            <div
+              class="mt-2 rounded-lg border border-ink-800/80 bg-ink-900/50 px-3 py-2 text-[11px] text-slate-400"
+            >
+              <span class="font-semibold uppercase tracking-wider text-slate-500">Sumber:</span>
+              <span class="ml-1.5 text-slate-300">{{ novel.title }}</span>
+              <span v-if="novel.scraper_name" class="ml-2 font-mono text-slate-500">
+                ({{ novel.scraper_name }})
+              </span>
+              <p v-if="novel.source_url" class="mt-0.5 truncate font-mono text-slate-500">
+                {{ novel.source_url }}
+              </p>
+            </div>
           </div>
           <div class="flex flex-wrap gap-1.5 text-[11px]">
             <span

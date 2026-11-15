@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, field_validator
 
+from core.synopsis import translate_metadata
 from scrapers.base import ScraperError
 from scrapers.generic import analyze_page_with_llm
 from scrapers.registry import find_scraper, has_dedicated_scraper, list_scrapers
@@ -18,6 +19,7 @@ HTML_SNIPPET_CHARS = 12000
 
 class UrlPayload(BaseModel):
     url: str
+    target_lang: str = "id"
 
     @field_validator("url")
     @classmethod
@@ -56,6 +58,13 @@ async def preview(payload: UrlPayload) -> dict[str, Any]:
         novel_error = ""
 
     if info is not None and info.chapters:
+        translated = await translate_metadata(
+            title=info.title,
+            synopsis=info.synopsis[:1200],
+            source_lang=info.source_lang,
+            target_lang=payload.target_lang,
+            concise_synopsis=True,
+        )
         return {
             "ok": True,
             "url": payload.url,
@@ -64,8 +73,10 @@ async def preview(payload: UrlPayload) -> dict[str, Any]:
             "dedicated": dedicated,
             "kind": "novel",
             "title": info.title,
+            "title_translated": translated["title_translated"],
             "author": info.author,
             "synopsis": info.synopsis[:800],
+            "synopsis_translated": translated["synopsis_translated"][:800],
             "source_lang": info.source_lang,
             "chapter_count": len(info.chapters),
             "chapters": [

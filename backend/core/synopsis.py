@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 import database
 from core.quality import CJK_RE
@@ -14,8 +17,8 @@ from llm.base import LLMError, TaskNotConfiguredError, TaskRouter
 
 TASK_NAME = "translate"
 
-#: Project creation must not hang on a slow provider.
-METADATA_TIMEOUT = 25.0
+#: Project creation must not hang indefinitely on a slow provider.
+METADATA_TIMEOUT = 60.0
 
 CJK_LANGS = frozenset({"zh", "ja", "ko", "chinese", "japanese", "korean"})
 
@@ -34,6 +37,13 @@ Title: {title}
 
 SYNOPSIS_PROMPT = """Translate this novel synopsis into {target}.
 Keep the tone and the paragraph breaks. Output only the translation.
+
+Synopsis:
+{synopsis}
+"""
+
+CONCISE_SYNOPSIS_PROMPT = """Summarize and translate this novel synopsis into {target} in 2-4 clear, engaging sentences.
+Ignore website ads, author notes, tags, and promotional URLs. Output only the translated summary.
 
 Synopsis:
 {synopsis}
@@ -97,6 +107,7 @@ async def translate_metadata(
     target_lang: str = "id",
     db_path: str | None = None,
     need_title: bool = True,
+    concise_synopsis: bool = False,
 ) -> dict[str, str]:
     """Best-effort title/synopsis translation for a newly created project.
 
@@ -120,34 +131,50 @@ async def translate_metadata(
     )
     target = _lang_name(target_lang, "the target language")
 
-    if need_title and _needs_translation(title, source_lang):
+    async def _translate_title() -> str:
         try:
             text = await asyncio.wait_for(
                 _generate(
                     resolved,
                     TITLE_PROMPT.format(target=target, title=title.strip()),
                     system,
-                    200,
+                    800,
                 ),
                 timeout=METADATA_TIMEOUT,
             )
-            result["title_translated"] = re.sub(r"\s+", " ", text)[:300]
-        except (LLMError, asyncio.TimeoutError):
-            result["title_translated"] = ""
+            return re.sub(r"\s+", " ", text)[:300]
+        except (LLMError, asyncio.TimeoutError) as exc:
+            logger.warning("translate_metadata title failed: %s", exc)
+            return ""
 
-    if _needs_translation(synopsis, source_lang):
+    async def _translate_synopsis() -> str:
+        prompt_tpl = CONCISE_SYNOPSIS_PROMPT if concise_synopsis else SYNOPSIS_PROMPT
+        max_tok = 900 if concise_synopsis else 1500
         try:
-            result["synopsis_translated"] = await asyncio.wait_for(
+            return await asyncio.wait_for(
                 _generate(
                     resolved,
-                    SYNOPSIS_PROMPT.format(target=target, synopsis=synopsis.strip()),
+                    prompt_tpl.format(target=target, synopsis=synopsis.strip()),
                     system,
-                    1500,
+                    max_tok,
                 ),
                 timeout=METADATA_TIMEOUT,
             )
-        except (LLMError, asyncio.TimeoutError):
-            result["synopsis_translated"] = ""
+        except (LLMError, asyncio.TimeoutError) as exc:
+            logger.warning("translate_metadata synopsis failed: %s", exc)
+            return ""
+
+    run_title = need_title and _needs_translation(title, source_lang)
+    run_synopsis = _needs_translation(synopsis, source_lang)
+
+    if run_title and run_synopsis:
+        t_res, s_res = await asyncio.gather(_translate_title(), _translate_synopsis())
+        result["title_translated"] = t_res
+        result["synopsis_translated"] = s_res
+    elif run_title:
+        result["title_translated"] = await _translate_title()
+    elif run_synopsis:
+        result["synopsis_translated"] = await _translate_synopsis()
 
     return result
 

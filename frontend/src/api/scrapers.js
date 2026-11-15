@@ -2,8 +2,11 @@ import { request } from './client'
 
 export const scrapersApi = {
   list: () => request('/scrapers'),
-  preview: (url) =>
-    request('/scrapers/preview', { method: 'POST', body: JSON.stringify({ url }) }),
+  preview: (url, targetLang = 'id') =>
+    request('/scrapers/preview', {
+      method: 'POST',
+      body: JSON.stringify({ url, target_lang: targetLang }),
+    }),
   analyze: (url, htmlSnippet) =>
     request('/scrapers/analyze', {
       method: 'POST',
