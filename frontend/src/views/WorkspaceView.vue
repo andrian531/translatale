@@ -5,6 +5,7 @@ import { novelsApi } from '@/api/novels'
 import { readerApi } from '@/api/reader'
 import { settingsApi } from '@/api/settings'
 import { translationApi } from '@/api/translation'
+import LineNumberEditor from '@/components/LineNumberEditor.vue'
 import { useI18n } from '@/i18n'
 
 const { t } = useI18n()
@@ -715,6 +716,22 @@ async function onFilesChosen(event) {
   }
 }
 
+const REMOVABLE_ISSUE_CODES = new Set(['promo', 'navigation', 'html_noise'])
+const removedIssueIndices = ref([])
+const dirtyRemovedCount = ref(0)
+
+const rawFlaggedLines = computed(() =>
+  (editing.value?.review_issues || [])
+    .filter((issue, idx) => issue.field === 'raw' && !removedIssueIndices.value.includes(idx))
+    .map((issue) => issue.line),
+)
+
+const translatedFlaggedLines = computed(() =>
+  (editing.value?.review_issues || [])
+    .filter((issue, idx) => issue.field === 'translated' && !removedIssueIndices.value.includes(idx))
+    .map((issue) => issue.line),
+)
+
 function openChapter(chapter) {
   editing.value = chapter
   editForm.title = chapter.title
@@ -723,6 +740,75 @@ function openChapter(chapter) {
   editForm.raw_content = chapter.raw_content
   editForm.translated_content = chapter.translated_content
   editPane.value = 'both'
+  removedIssueIndices.value = []
+  dirtyRemovedCount.value = 0
+}
+
+function _stripMatchingLines(text, targets) {
+  const lines = (text || '').split(/\r?\n/)
+  const toDrop = new Set()
+  for (const issue of targets) {
+    const idx = (issue.line || 0) - 1
+    const needle = String(issue.snippet || '').replace(/…$/, '').trim()
+    if (idx >= 0 && idx < lines.length && (!needle || lines[idx].includes(needle))) {
+      toDrop.add(idx)
+      continue
+    }
+    if (needle) {
+      const found = lines.findIndex((line, i) => !toDrop.has(i) && line.includes(needle))
+      if (found !== -1) toDrop.add(found)
+    }
+  }
+  if (!toDrop.size) return { text, removed: 0 }
+  const kept = lines.filter((_, i) => !toDrop.has(i))
+  const cleaned = kept.join('\n').replace(/\n{3,}/g, '\n\n').trim()
+  return { text: cleaned, removed: toDrop.size }
+}
+
+function removeAllDirtyLines() {
+  const issues = editing.value?.review_issues || []
+  const rawTargets = []
+  const translatedTargets = []
+  const newRemoved = [...removedIssueIndices.value]
+
+  issues.forEach((issue, idx) => {
+    if (newRemoved.includes(idx) || !REMOVABLE_ISSUE_CODES.has(issue.code)) return
+    if (issue.field === 'raw') {
+      rawTargets.push(issue)
+      newRemoved.push(idx)
+    } else if (issue.field === 'translated') {
+      translatedTargets.push(issue)
+      newRemoved.push(idx)
+    }
+  })
+
+  let count = 0
+  if (rawTargets.length) {
+    const res = _stripMatchingLines(editForm.raw_content, rawTargets)
+    editForm.raw_content = res.text
+    count += res.removed
+  }
+  if (translatedTargets.length) {
+    const res = _stripMatchingLines(editForm.translated_content, translatedTargets)
+    editForm.translated_content = res.text
+    count += res.removed
+  }
+  removedIssueIndices.value = newRemoved
+  dirtyRemovedCount.value += count
+}
+
+function removeSingleDirtyLine(issue, idx) {
+  if (removedIssueIndices.value.includes(idx)) return
+  if (issue.field === 'raw') {
+    const res = _stripMatchingLines(editForm.raw_content, [issue])
+    editForm.raw_content = res.text
+    dirtyRemovedCount.value += res.removed
+  } else if (issue.field === 'translated') {
+    const res = _stripMatchingLines(editForm.translated_content, [issue])
+    editForm.translated_content = res.text
+    dirtyRemovedCount.value += res.removed
+  }
+  removedIssueIndices.value = [...removedIssueIndices.value, idx]
 }
 
 function openReader(chapterId) {
@@ -2549,25 +2635,56 @@ onBeforeUnmount(stopStream)
           v-if="editing.needs_review && editing.review_issues?.length"
           class="rounded-lg border border-amber-700/70 bg-amber-950/30 p-3 text-xs text-amber-200"
         >
-          <p class="font-semibold text-amber-300">
-            ! {{ t('workspace.chapterModal.reviewBannerTitle') }}
-          </p>
-          <p class="mt-0.5 text-[11px] text-amber-300/90">
-            {{ t('workspace.chapterModal.reviewBannerHint') }}
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p class="font-semibold text-amber-300">
+                ! {{ t('workspace.chapterModal.reviewBannerTitle') }}
+              </p>
+              <p class="mt-0.5 text-[11px] text-amber-300/90">
+                {{ t('workspace.chapterModal.reviewBannerHint') }}
+              </p>
+            </div>
+            <button
+              v-if="
+                editing.review_issues.some(
+                  (issue, idx) =>
+                    REMOVABLE_ISSUE_CODES.has(issue.code) && !removedIssueIndices.includes(idx),
+                )
+              "
+              type="button"
+              class="btn-danger !px-2.5 !py-1 text-[11px]"
+              @click="removeAllDirtyLines"
+            >
+              {{ t('workspace.chapterModal.removeFlaggedLines') }}
+            </button>
+          </div>
+          <p v-if="dirtyRemovedCount > 0" class="mt-2 text-[11px] font-medium text-emerald-400">
+            ✓ {{ t('workspace.chapterModal.removedLinesNotice', { count: dirtyRemovedCount }) }}
           </p>
           <ul class="mt-2 max-h-28 space-y-1 overflow-y-auto text-[11px]">
             <li
               v-for="(issue, idx) in editing.review_issues"
               :key="`${issue.code}-${issue.field}-${issue.line}-${idx}`"
-              class="flex flex-wrap items-baseline gap-1.5"
+              class="flex flex-wrap items-center justify-between gap-1.5"
+              :class="removedIssueIndices.includes(idx) ? 'opacity-45 line-through' : ''"
             >
-              <span class="rounded border border-amber-700/70 bg-amber-950/60 px-1.5 py-0.5 font-medium text-amber-400">
-                {{ t(`workspace.chapterModal.issueCodes.${issue.code}`) }}
-              </span>
-              <span class="font-mono text-amber-300/90">
-                {{ issue.field }}:L{{ issue.line }}
-              </span>
-              <span class="truncate text-amber-200">{{ issue.snippet }}</span>
+              <div class="flex min-w-0 flex-1 flex-wrap items-baseline gap-1.5">
+                <span class="rounded border border-amber-700/70 bg-amber-950/60 px-1.5 py-0.5 font-medium text-amber-400">
+                  {{ t(`workspace.chapterModal.issueCodes.${issue.code}`) }}
+                </span>
+                <span class="font-mono text-amber-300/90">
+                  {{ issue.field }}:L{{ issue.line }}
+                </span>
+                <span class="truncate text-amber-200">{{ issue.snippet }}</span>
+              </div>
+              <button
+                v-if="REMOVABLE_ISSUE_CODES.has(issue.code) && !removedIssueIndices.includes(idx)"
+                type="button"
+                class="shrink-0 rounded border border-rose-700/70 bg-rose-950/40 px-1.5 py-0.5 text-[10px] font-medium text-rose-300 hover:opacity-85"
+                @click="removeSingleDirtyLine(issue, idx)"
+              >
+                {{ t('workspace.chapterModal.removeLine') }}
+              </button>
             </li>
           </ul>
         </div>
@@ -2616,29 +2733,27 @@ onBeforeUnmount(stopStream)
 
         <div class="grid gap-3" :class="editPane === 'both' ? 'lg:grid-cols-2' : 'grid-cols-1'">
           <div v-if="editPane !== 'translated'">
-            <label class="label" for="edit-raw">
+            <label class="label">
               {{ t('workspace.chapterModal.rawLabel', { count: editForm.raw_content.length }) }}
             </label>
-            <textarea
-              id="edit-raw"
+            <LineNumberEditor
               v-model="editForm.raw_content"
-              class="input h-80 resize-y font-mono text-xs"
               :placeholder="t('workspace.chapterModal.rawPlaceholder')"
+              :highlighted-lines="rawFlaggedLines"
             />
           </div>
           <div v-if="editPane !== 'raw'">
-            <label class="label" for="edit-translated">
+            <label class="label">
               {{
                 t('workspace.chapterModal.translatedLabel', {
                   count: editForm.translated_content.length,
                 })
               }}
             </label>
-            <textarea
-              id="edit-translated"
+            <LineNumberEditor
               v-model="editForm.translated_content"
-              class="input h-80 resize-y font-mono text-xs"
               :placeholder="t('workspace.chapterModal.translatedPlaceholder')"
+              :highlighted-lines="translatedFlaggedLines"
             />
           </div>
         </div>

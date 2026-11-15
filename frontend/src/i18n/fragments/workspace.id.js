@@ -211,6 +211,9 @@ export default {
     tableReviewNotice: 'Bab bertanda (!) terindikasi berisi promosi situs, navigasi halaman, atau sisa teks — cek Raw atau edit manual hasil terjemahan sebelum ekspor.',
     reviewBannerTitle: 'Terdeteksi indikasi sisa scraping atau teks yang perlu dicek',
     reviewBannerHint: 'Disarankan edit manual atau cek baris yang ditandai di bawah sebelum ekspor.',
+    removeFlaggedLines: 'Hapus Baris Kotor',
+    removeLine: 'Hapus',
+    removedLinesNotice: '{count} baris kotor dihapus di editor — cek hasil teks lalu klik Simpan.',
     issueCodes: {
       promo: 'Promosi / Situs',
       navigation: 'Navigasi Halaman',
