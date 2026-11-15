@@ -744,105 +744,131 @@ async def _run_translate(
         )
 
 
+APPLY_REFERENCE_CONCURRENCY = 5
+
+
 async def _run_apply_reference(
     state: JobState,
     novel_id: int,
     chapter_ids: list[int] | None,
     db_path: str | None,
 ) -> None:
-    """Apply updated reference/glossary settings to already-translated chapters."""
+    """Apply updated reference/glossary settings to already-translated chapters in parallel."""
     job_id = state.job_id
     if not chapter_ids:
         raise JobError("Tidak ada bab terjemahan untuk diperbarui")
 
     total = len(chapter_ids)
-    _update_job(job_id, total_items=total, message=f"0/{total} bab")
+    init_msg = f"0/{total} bab (paralel {min(APPLY_REFERENCE_CONCURRENCY, total)}x)"
+    _update_job(job_id, total_items=total, message=init_msg)
     _publish(
         job_id,
-        {"type": "progress", "total_items": total, "completed_items": 0, "message": f"0/{total} bab"},
+        {"type": "progress", "total_items": total, "completed_items": 0, "message": init_msg},
     )
 
     completed = 0
-    for chapter_id in chapter_ids:
+    semaphore = asyncio.Semaphore(APPLY_REFERENCE_CONCURRENCY)
+
+    async def _process_one(chapter_id: int) -> None:
+        nonlocal completed
         if state.cancelled:
             raise asyncio.CancelledError
 
-        with database.get_conn(db_path) as conn:
-            row = conn.execute(
-                "SELECT id, chapter_number, title FROM chapters WHERE id = ?", (chapter_id,)
-            ).fetchone()
-        if row is None:
-            continue
-        chapter = dict(row)
-        label = _fmt_number(chapter["chapter_number"])
+        async with semaphore:
+            if state.cancelled:
+                raise asyncio.CancelledError
 
-        _update_job(
-            job_id,
-            current_chapter_id=chapter_id,
-            message=f"Menyesuaikan bab {label}: {chapter['title'] or ''}".strip(),
-        )
-        _publish(
-            job_id,
-            {
-                "type": "chapter",
-                "chapter_id": chapter_id,
-                "chapter_number": chapter["chapter_number"],
-                "chapter_title": chapter["title"],
-                "message": f"Menyesuaikan bab {label}: {chapter['title'] or ''}".strip(),
-            },
-        )
+            with database.get_conn(db_path) as conn:
+                row = conn.execute(
+                    "SELECT id, chapter_number, title FROM chapters WHERE id = ?", (chapter_id,)
+                ).fetchone()
+            if row is None:
+                return
+            chapter = dict(row)
+            label = _fmt_number(chapter["chapter_number"])
 
-        def on_progress(payload: dict[str, Any], _chapter: dict[str, Any] = chapter) -> None:
+            start_msg = f"Menyesuaikan bab {label}: {chapter['title'] or ''}".strip()
+            logger.info("[Job %s] %s", job_id, start_msg)
             _publish(
                 job_id,
                 {
-                    **payload,
-                    "chapter_number": _chapter["chapter_number"],
-                    "chapter_title": _chapter["title"],
-                    "message": (
-                        f"Bab {_fmt_number(_chapter['chapter_number'])} — chunk "
-                        f"{payload.get('chunk_index')}/{payload.get('chunk_total')}"
-                    ),
-                },
-            )
-
-        try:
-            result = await apply_reference_to_chapter(
-                chapter_id, db_path, on_progress=on_progress
-            )
-        except (TranslationError, Exception) as exc:  # noqa: BLE001
-            _publish(
-                job_id,
-                {
-                    "type": "chapter_error",
+                    "type": "chapter",
                     "chapter_id": chapter_id,
                     "chapter_number": chapter["chapter_number"],
-                    "message": f"Bab {label} gagal disesuaikan: {exc}",
+                    "chapter_title": chapter["title"],
+                    "completed_items": completed,
+                    "total_items": total,
+                    "message": start_msg,
                 },
             )
-            raise JobError(f"Penyesuaian berhenti di Bab {label}: {exc}") from exc
 
-        completed += 1
-        _update_job(job_id, completed_items=completed)
-        _publish(
-            job_id,
-            {
-                "type": "chapter_done",
-                "chapter_id": chapter_id,
-                "chapter_number": chapter["chapter_number"],
-                "chapter_title": chapter["title"],
-                "title_translated": result["title_translated"],
-                "quality_score": result["quality"]["score"],
-                "grade": result["quality"]["grade"],
-                "chunks": result["chunks"],
-                "completed_items": completed,
-                "total_items": total,
-                "message": (
-                    f"Bab {label} diperbarui — skor {result['quality']['score']} "
-                    f"({result['quality']['grade']})"
-                ),
-            },
-        )
+            def on_progress(
+                payload: dict[str, Any], _chapter: dict[str, Any] = chapter, _label: str = label
+            ) -> None:
+                _publish(
+                    job_id,
+                    {
+                        **payload,
+                        "chapter_number": _chapter["chapter_number"],
+                        "chapter_title": _chapter["title"],
+                        "completed_items": completed,
+                        "total_items": total,
+                        "message": (
+                            f"Bab {_label} — chunk "
+                            f"{payload.get('chunk_index')}/{payload.get('chunk_total')}"
+                        ),
+                    },
+                )
+
+            try:
+                result = await apply_reference_to_chapter(
+                    chapter_id, db_path, on_progress=on_progress
+                )
+            except (TranslationError, Exception) as exc:  # noqa: BLE001
+                _publish(
+                    job_id,
+                    {
+                        "type": "chapter_error",
+                        "chapter_id": chapter_id,
+                        "chapter_number": chapter["chapter_number"],
+                        "message": f"Bab {label} gagal disesuaikan: {exc}",
+                    },
+                )
+                raise JobError(f"Penyesuaian berhenti di Bab {label}: {exc}") from exc
+
+            completed += 1
+            done_msg = (
+                f"Bab {label} diperbarui ({completed}/{total}) — skor {result['quality']['score']} "
+                f"({result['quality']['grade']})"
+            )
+            logger.info("[Job %s] %s", job_id, done_msg)
+            _update_job(job_id, completed_items=completed, message=done_msg)
+            _publish(
+                job_id,
+                {
+                    "type": "chapter_done",
+                    "chapter_id": chapter_id,
+                    "chapter_number": chapter["chapter_number"],
+                    "chapter_title": chapter["title"],
+                    "title_translated": result["title_translated"],
+                    "quality_score": result["quality"]["score"],
+                    "grade": result["quality"]["grade"],
+                    "chunks": result["chunks"],
+                    "completed_items": completed,
+                    "total_items": total,
+                    "message": done_msg,
+                },
+            )
+
+    tasks = [asyncio.create_task(_process_one(cid)) for cid in chapter_ids]
+    try:
+        await asyncio.gather(*tasks)
+    except BaseException:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
 
 
 def reset_jobs() -> None:
