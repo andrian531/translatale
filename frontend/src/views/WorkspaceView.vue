@@ -671,17 +671,52 @@ function markDirty() {
   referenceDirty.value = true
 }
 
-function addCharacter() {
-  reference.value.characters.push({
-    name: '',
-    romanized_name: '',
-    age: '',
-    gender: '',
-    aliases: [],
-    relationships: '',
-    notes: '',
-  })
+const characterModal = ref(null)
+
+function openCharacterModal(index = -1) {
+  const existing = index >= 0 ? reference.value.characters[index] : null
+  characterModal.value = {
+    index,
+    name: existing?.name || '',
+    romanized_name: existing?.romanized_name || '',
+    gender: existing?.gender || '',
+    age: existing?.age || '',
+    aliasesText: (existing?.aliases ?? []).join(', '),
+    relationships: existing?.relationships || '',
+    notes: existing?.notes || '',
+  }
+}
+
+function saveCharacterModal() {
+  const modal = characterModal.value
+  if (!modal) return
+  if (!modal.name.trim() && !modal.romanized_name.trim()) {
+    flash('error', 'Isi minimal Nama (sumber) atau Nama Romanisasi.')
+    return
+  }
+  const entry = {
+    name: modal.name.trim(),
+    romanized_name: modal.romanized_name.trim(),
+    gender: modal.gender.trim(),
+    age: modal.age.trim(),
+    aliases: modal.aliasesText
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean),
+    relationships: modal.relationships.trim(),
+    notes: modal.notes.trim(),
+  }
+  if (modal.index >= 0) {
+    reference.value.characters[modal.index] = entry
+  } else {
+    reference.value.characters.push(entry)
+  }
   markDirty()
+  characterModal.value = null
+}
+
+function addCharacter() {
+  openCharacterModal(-1)
 }
 
 function addTerm() {
@@ -1361,80 +1396,89 @@ onBeforeUnmount(stopStream)
               Belum ada karakter. Jalankan Run AI Analysis atau tambah manual.
             </p>
 
-            <div v-else class="divide-y divide-ink-800/80 border-t border-ink-800/80">
-              <div
-                v-for="(character, index) in reference.characters"
-                :key="index"
-                class="py-2.5 first:pt-2 last:pb-0"
-              >
-                <div class="grid items-center gap-1.5 grid-cols-[minmax(0,1fr)_minmax(0,1fr)_28px] sm:grid-cols-[minmax(0,1.1fr)_minmax(0,1.1fr)_minmax(0,0.55fr)_minmax(0,0.45fr)_28px]">
-                  <input
-                    v-model="character.name"
-                    class="input col-span-2 !px-2 !py-1 text-xs sm:col-span-1"
-                    placeholder="Nama asli"
-                    title="Nama karakter (aksara sumber)"
-                    aria-label="Nama karakter asli"
-                    @input="markDirty"
-                  />
-                  <input
-                    v-model="character.romanized_name"
-                    class="input col-span-3 !px-2 !py-1 text-xs sm:col-span-1"
-                    placeholder="Romanized"
-                    title="Nama romanisasi (Latin)"
-                    aria-label="Nama romanisasi"
-                    @input="markDirty"
-                  />
-                  <input
-                    v-model="character.gender"
-                    class="input col-span-1 !px-2 !py-1 text-xs sm:col-span-1"
-                    placeholder="Gender"
-                    title="Gender"
-                    aria-label="Gender"
-                    @input="markDirty"
-                  />
-                  <input
-                    v-model="character.age"
-                    class="input col-span-2 !px-2 !py-1 text-xs sm:col-span-1"
-                    placeholder="Usia"
-                    title="Usia"
-                    aria-label="Usia"
-                    @input="markDirty"
-                  />
-                  <button
-                    type="button"
-                    class="btn-danger col-start-3 row-start-1 h-[26px] w-7 !p-0 text-[11px] sm:col-start-auto sm:row-start-auto"
-                    title="Hapus karakter"
-                    aria-label="Hapus karakter"
-                    @click="removeAt(reference.characters, index)"
-                  >
-                    ✕
-                  </button>
-                </div>
-                <div class="mt-1.5 grid gap-1.5 sm:grid-cols-[minmax(0,0.9fr)_minmax(0,1.2fr)_minmax(0,1.2fr)]">
-                  <input
-                    :value="aliasesToText(character)"
-                    class="input !px-2 !py-1 text-xs"
-                    placeholder="Alias / julukan (pisahkan koma)"
-                    title="Alias atau julukan, pisahkan dengan koma"
-                    aria-label="Alias atau julukan"
-                    @input="setAliases(character, $event.target.value)"
-                  />
-                  <input
-                    v-model="character.relationships"
-                    class="input !px-2 !py-1 text-xs"
-                    placeholder="Relasi antar karakter"
-                    title="Hubungan dengan karakter lain"
-                    aria-label="Relasi antar karakter"
-                    @input="markDirty"
-                  />
-                  <input
-                    v-model="character.notes"
-                    class="input !px-2 !py-1 text-xs"
-                    placeholder="Catatan karakter"
-                    title="Catatan tambahan"
-                    aria-label="Catatan karakter"
-                    @input="markDirty"
-                  />
+            <div v-else>
+              <div class="hidden gap-3 border-b border-ink-800/80 pb-1.5 text-[11px] font-medium text-slate-400 sm:grid sm:grid-cols-[minmax(0,1.2fr)_minmax(0,1.8fr)_minmax(0,1.4fr)_auto]">
+                <span>Karakter</span>
+                <span>Julukan & Relasi</span>
+                <span>Catatan</span>
+                <span class="text-right">Aksi</span>
+              </div>
+              <div class="divide-y divide-ink-800/80">
+                <div
+                  v-for="(character, index) in reference.characters"
+                  :key="index"
+                  class="grid items-start gap-2.5 py-2.5 sm:grid-cols-[minmax(0,1.2fr)_minmax(0,1.8fr)_minmax(0,1.4fr)_auto]"
+                >
+                  <div class="min-w-0">
+                    <p class="truncate text-xs font-semibold text-white">
+                      {{ character.romanized_name || character.name || '(tanpa nama)' }}
+                    </p>
+                    <p
+                      v-if="character.name && character.romanized_name"
+                      class="truncate text-[11px] text-slate-400"
+                    >
+                      Asli: {{ character.name }}
+                    </p>
+                    <div
+                      v-if="character.gender || character.age"
+                      class="mt-1 flex flex-wrap gap-1 text-[10px]"
+                    >
+                      <span
+                        v-if="character.gender"
+                        class="badge bg-sky-950/60 text-sky-300"
+                        title="Gender"
+                      >
+                        {{ character.gender }}
+                      </span>
+                      <span
+                        v-if="character.age"
+                        class="badge bg-amber-950/60 text-amber-300"
+                        title="Usia"
+                      >
+                        {{ character.age }}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div class="min-w-0 space-y-1 text-xs">
+                    <p v-if="(character.aliases ?? []).length" class="text-indigo-300">
+                      <span class="text-[11px] text-slate-500">Julukan:</span>
+                      {{ aliasesToText(character) }}
+                    </p>
+                    <p v-if="character.relationships" class="text-slate-300">
+                      <span class="text-[11px] text-slate-500">Relasi:</span>
+                      {{ character.relationships }}
+                    </p>
+                    <p
+                      v-if="!(character.aliases ?? []).length && !character.relationships"
+                      class="text-slate-600"
+                    >
+                      —
+                    </p>
+                  </div>
+
+                  <div class="min-w-0 text-xs text-slate-400">
+                    {{ character.notes || '—' }}
+                  </div>
+
+                  <div class="flex shrink-0 items-center justify-end gap-1">
+                    <button
+                      type="button"
+                      class="btn-ghost !px-2 !py-1 text-[11px]"
+                      @click="openCharacterModal(index)"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      class="btn-danger !px-2 !py-1 text-[11px]"
+                      title="Hapus karakter"
+                      aria-label="Hapus karakter"
+                      @click="removeAt(reference.characters, index)"
+                    >
+                      ✕
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1680,6 +1724,101 @@ onBeforeUnmount(stopStream)
         </div>
       </template>
     </template>
+
+    <!-- ===================== character edit modal ===================== -->
+    <div
+      v-if="characterModal"
+      class="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-black/70 p-4 py-10"
+      @click.self="characterModal = null"
+    >
+      <form
+        class="w-full max-w-xl space-y-4 rounded-xl border border-ink-700 bg-ink-900 p-5 shadow-2xl"
+        @submit.prevent="saveCharacterModal"
+      >
+        <div>
+          <h2 class="text-sm font-semibold text-white">
+            {{ characterModal.index >= 0 ? 'Edit Karakter' : 'Tambah Karakter' }}
+          </h2>
+          <p class="mt-1 text-xs text-slate-500">
+            Data karakter disuntikkan ke prompt translasi agar ejaan nama, julukan, dan relasi tetap konsisten.
+          </p>
+        </div>
+
+        <div class="grid gap-3 sm:grid-cols-2">
+          <div>
+            <label class="label" for="char-name">Nama (Aksara Sumber)</label>
+            <input
+              id="char-name"
+              v-model="characterModal.name"
+              class="input text-xs"
+              placeholder="mis. 林风"
+            />
+          </div>
+          <div>
+            <label class="label" for="char-romanized">Nama Romanisasi (Latin)</label>
+            <input
+              id="char-romanized"
+              v-model="characterModal.romanized_name"
+              class="input text-xs"
+              placeholder="mis. Lin Feng"
+            />
+          </div>
+          <div>
+            <label class="label" for="char-gender">Gender</label>
+            <input
+              id="char-gender"
+              v-model="characterModal.gender"
+              class="input text-xs"
+              placeholder="mis. Male / Female"
+            />
+          </div>
+          <div>
+            <label class="label" for="char-age">Usia</label>
+            <input
+              id="char-age"
+              v-model="characterModal.age"
+              class="input text-xs"
+              placeholder="mis. 18"
+            />
+          </div>
+        </div>
+
+        <div>
+          <label class="label" for="char-aliases">Alias / Julukan (pisahkan dengan koma)</label>
+          <input
+            id="char-aliases"
+            v-model="characterModal.aliasesText"
+            class="input text-xs"
+            placeholder="mis. Senior Brother Lin, Shadow Blade"
+          />
+        </div>
+
+        <div>
+          <label class="label" for="char-relationships">Relasi Antar Karakter</label>
+          <input
+            id="char-relationships"
+            v-model="characterModal.relationships"
+            class="input text-xs"
+            placeholder="mis. Elder martial brother of Su Mei; disciple of Sect Master"
+          />
+        </div>
+
+        <div>
+          <label class="label" for="char-notes">Catatan Karakter</label>
+          <textarea
+            id="char-notes"
+            v-model="characterModal.notes"
+            class="input h-20 resize-y text-xs"
+            placeholder="mis. Speaks formally to elders, calm personality"
+          />
+        </div>
+
+        <div class="flex justify-end gap-2">
+          <button type="button" class="btn-ghost" @click="characterModal = null">Batal</button>
+          <button type="submit" class="btn-primary">Simpan Karakter</button>
+        </div>
+      </form>
+    </div>
 
     <!-- ===================== chapters from URL modal ===================== -->
     <div
