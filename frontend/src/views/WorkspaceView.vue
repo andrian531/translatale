@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { novelsApi } from '@/api/novels'
 import { readerApi } from '@/api/reader'
+import { settingsApi } from '@/api/settings'
 import { translationApi } from '@/api/translation'
 
 const route = useRoute()
@@ -20,6 +21,11 @@ const tab = ref('chapters')
 const filter = ref('all')
 const selected = ref([])
 const fetching = ref(false)
+const fetchBatchSize = ref(50)
+const showUrlModal = ref(false)
+const urlsText = ref('')
+const savingUrls = ref(false)
+const syncingUrl = ref(false)
 
 // -- job / live progress ------------------------------------------------
 const job = ref(null)
@@ -110,6 +116,16 @@ const allVisibleSelected = computed(
     visibleChapters.value.length > 0 &&
     visibleChapters.value.every((chapter) => selected.value.includes(chapter.id)),
 )
+
+const JOB_LABELS = {
+  translate: 'Translate',
+  story_analysis: 'Analisa Cerita',
+  fetch: 'Fetch Bab',
+}
+
+function jobLabel(type) {
+  return JOB_LABELS[type] ?? type ?? 'Job'
+}
 
 function flash(type, text) {
   notice.value = { type, text }
@@ -277,23 +293,82 @@ function dismissJob() {
 // ----------------------------------------------------------------------
 // Chapters
 // ----------------------------------------------------------------------
+async function startFetch(payload) {
+  try {
+    const started = await novelsApi.startFetchJob(novelId.value, payload)
+    job.value = started
+    jobMessage.value = started.message
+    watchJob(started.id)
+    selected.value = []
+  } catch (err) {
+    flash('error', `Gagal memulai fetch: ${err.message}`)
+  }
+}
+
 async function fetchSelected() {
   const ids = pendingSelected.value.map((chapter) => chapter.id)
   if (!ids.length) return
   fetching.value = true
   try {
-    const result = await novelsApi.fetchChapters(novelId.value, ids)
-    await load()
-    if (result.failed) {
-      flash('error', `${result.fetched} bab berhasil, ${result.failed} gagal.`)
-    } else {
-      flash('success', `${result.fetched} bab berhasil di-fetch.`)
-    }
-    selected.value = []
-  } catch (err) {
-    flash('error', `Gagal fetch: ${err.message}`)
+    await startFetch({ chapterIds: ids })
   } finally {
     fetching.value = false
+  }
+}
+
+async function fetchBatch() {
+  fetching.value = true
+  try {
+    await startFetch({})
+  } finally {
+    fetching.value = false
+  }
+}
+
+function openUrlModal() {
+  urlsText.value = ''
+  showUrlModal.value = true
+}
+
+async function addFromUrls() {
+  const urls = urlsText.value
+    .split(/\s*\n\s*/)
+    .map((url) => url.trim())
+    .filter(Boolean)
+  if (!urls.length) return
+
+  savingUrls.value = true
+  try {
+    const result = await novelsApi.addChaptersFromUrl(novelId.value, urls)
+    showUrlModal.value = false
+    await load()
+    const parts = [`${result.added} bab ditambahkan`]
+    if (result.skipped) parts.push(`${result.skipped} duplikat dilewati`)
+    if (result.failed) parts.push(`${result.failed} gagal`)
+    const detail = result.errors?.[0]?.error ? ` — ${result.errors[0].error}` : ''
+    flash(result.failed ? 'error' : 'success', parts.join(', ') + detail)
+  } catch (err) {
+    flash('error', `Gagal menambah bab dari URL: ${err.message}`)
+  } finally {
+    savingUrls.value = false
+  }
+}
+
+async function syncFromSource() {
+  syncingUrl.value = true
+  try {
+    const result = await novelsApi.syncNovelChapters(novelId.value)
+    await load()
+    flash(
+      'success',
+      result.added
+        ? `${result.added} bab baru ditambahkan (${result.skipped} sudah ada).`
+        : `Tidak ada bab baru — ${result.found ?? 0} bab di sumber sudah ada semua.`,
+    )
+  } catch (err) {
+    flash('error', `Gagal cek bab baru: ${err.message}`)
+  } finally {
+    syncingUrl.value = false
   }
 }
 
@@ -495,6 +570,12 @@ watch(novelId, async () => {
 
 onMounted(async () => {
   await Promise.all([load(), loadReference()])
+  try {
+    const scraper = await settingsApi.getScraperSettings()
+    fetchBatchSize.value = scraper.fetch_batch_size ?? 50
+  } catch {
+    // The button just falls back to the default batch size.
+  }
 })
 
 onBeforeUnmount(stopStream)
@@ -626,7 +707,7 @@ onBeforeUnmount(stopStream)
       >
         <div class="flex flex-wrap items-center gap-2 text-sm">
           <span class="font-medium text-slate-100">
-            {{ job.job_type === 'translate' ? 'Translate' : 'Analisa Cerita' }}
+            {{ jobLabel(job.job_type) }}
           </span>
           <span class="badge bg-ink-800 text-slate-300">{{ job.status }}</span>
           <span class="text-xs text-slate-400">
@@ -687,13 +768,41 @@ onBeforeUnmount(stopStream)
           <button class="btn-ghost" :disabled="jobActive" @click="startAnalyze">
             Analisa Cerita (AI)
           </button>
+
+          <span class="mx-1 h-5 w-px self-center bg-ink-700" />
+
           <button
             class="btn-ghost"
-            :disabled="fetching || !pendingSelected.length"
+            :disabled="jobActive || fetching || !novel.pending_count"
+            :title="
+              novel.pending_count
+                ? `Fetch ${Math.min(fetchBatchSize, novel.pending_count)} bab pending berikutnya`
+                : 'Tidak ada bab pending_fetch'
+            "
+            @click="fetchBatch"
+          >
+            Fetch Batch ({{ Math.min(fetchBatchSize, novel.pending_count || 0) }} bab)
+          </button>
+          <button
+            class="btn-ghost"
+            :disabled="jobActive || fetching || !pendingSelected.length"
             @click="fetchSelected"
           >
-            {{ fetching ? 'Mengambil…' : `Fetch Raw (${pendingSelected.length})` }}
+            Fetch Terpilih ({{ pendingSelected.length }})
           </button>
+          <button class="btn-ghost" @click="openUrlModal">+ Bab dari URL</button>
+          <button
+            v-if="novel.source_url"
+            class="btn-ghost"
+            :disabled="jobActive || syncingUrl"
+            title="Bandingkan daftar bab di situs sumber dengan yang ada di sini"
+            @click="syncFromSource"
+          >
+            {{ syncingUrl ? 'Mengecek…' : 'Cek Bab Baru (Sync URL)' }}
+          </button>
+
+          <span class="mx-1 h-5 w-px self-center bg-ink-700" />
+
           <button class="btn-ghost" @click="openManual">+ Bab Manual</button>
           <button class="btn-ghost" :disabled="uploading" @click="pickFiles">
             {{ uploading ? 'Mengunggah…' : 'Upload .txt' }}
@@ -1012,6 +1121,44 @@ onBeforeUnmount(stopStream)
         </div>
       </template>
     </template>
+
+    <!-- ===================== chapters from URL modal ===================== -->
+    <div
+      v-if="showUrlModal"
+      class="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-black/70 p-4 py-10"
+      @click.self="showUrlModal = false"
+    >
+      <form
+        class="w-full max-w-2xl space-y-4 rounded-xl border border-ink-700 bg-ink-900 p-5 shadow-2xl"
+        @submit.prevent="addFromUrls"
+      >
+        <div>
+          <h2 class="text-sm font-semibold text-white">Tambah Bab dari URL</h2>
+          <p class="mt-1 text-xs text-slate-500">
+            Satu URL bab per baris. Modul scraper dipilih otomatis dari domain; URL yang sudah ada
+            di novel ini akan dilewati.
+          </p>
+        </div>
+        <div>
+          <label class="label" for="urls-input">URL bab</label>
+          <textarea
+            id="urls-input"
+            v-model="urlsText"
+            class="input h-40 resize-y font-mono text-xs"
+            placeholder="https://contoh.com/book/123/chapter-1.htm&#10;https://contoh.com/book/123/chapter-2.htm"
+          />
+          <p class="mt-1 text-[11px] text-slate-500">
+            {{ urlsText.split(/\n/).filter((item) => item.trim()).length }} URL terdeteksi
+          </p>
+        </div>
+        <div class="flex justify-end gap-2">
+          <button type="button" class="btn-ghost" @click="showUrlModal = false">Batal</button>
+          <button type="submit" class="btn-primary" :disabled="savingUrls || !urlsText.trim()">
+            {{ savingUrls ? 'Mengambil…' : 'Tambah Bab' }}
+          </button>
+        </div>
+      </form>
+    </div>
 
     <!-- ===================== manual chapter modal ===================== -->
     <div

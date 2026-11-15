@@ -19,6 +19,10 @@ export const settingsApi = {
 
   syncProviderModels: (id) =>
     request(`/settings/providers/${id}/models/sync`, { method: 'POST' }),
+
+  getScraperSettings: () => request('/settings/scraper'),
+  saveScraperSettings: (payload) =>
+    request('/settings/scraper', { method: 'PUT', body: JSON.stringify(payload) }),
 }
 
 export const healthApi = {

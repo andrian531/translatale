@@ -82,6 +82,20 @@ CORS_ORIGINS: list[str] = [
     "http://127.0.0.1:5173",
 ]
 
+#: Defaults for the "scraper" row of ``app_settings``.
+SCRAPER_SETTINGS_DEFAULTS: dict[str, float] = {
+    "fetch_batch_size": 50,
+    "fetch_delay_seconds": 1.0,
+    "fetch_max_consecutive_errors": 3,
+}
+
+#: (min, max) accepted by ``PUT /api/settings/scraper``.
+SCRAPER_SETTINGS_LIMITS: dict[str, tuple[float, float]] = {
+    "fetch_batch_size": (1, 500),
+    "fetch_delay_seconds": (0.0, 10.0),
+    "fetch_max_consecutive_errors": (1, 20),
+}
+
 HTTP_TIMEOUT = 60.0
 
 

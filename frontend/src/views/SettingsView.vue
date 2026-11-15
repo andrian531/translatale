@@ -29,6 +29,13 @@ const syncingId = ref(null)
 const testResults = reactive({})
 const syncResults = reactive({})
 
+const scraperForm = reactive({
+  fetch_batch_size: 50,
+  fetch_delay_seconds: 1,
+  fetch_max_consecutive_errors: 3,
+})
+const savingScraper = ref(false)
+
 const taskDrafts = reactive({})
 const savingTask = ref(null)
 const taskSyncing = ref(null)
@@ -171,13 +178,48 @@ async function loadAll() {
   loading.value = true
   loadError.value = ''
   try {
-    const [metaData] = await Promise.all([settingsApi.meta(), loadProviders(), loadTasks()])
+    const [metaData] = await Promise.all([
+      settingsApi.meta(),
+      loadProviders(),
+      loadTasks(),
+      loadScraperSettings(),
+    ])
     meta.value = metaData
     if (!form.base_url) applyTypeDefaults()
   } catch (error) {
     loadError.value = error.message
   } finally {
     loading.value = false
+  }
+}
+
+async function loadScraperSettings() {
+  try {
+    const data = await settingsApi.getScraperSettings()
+    scraperForm.fetch_batch_size = data.fetch_batch_size
+    scraperForm.fetch_delay_seconds = data.fetch_delay_seconds
+    scraperForm.fetch_max_consecutive_errors = data.fetch_max_consecutive_errors
+  } catch {
+    // Non-fatal: the form keeps its defaults and a save will still work.
+  }
+}
+
+async function saveScraperSettings() {
+  savingScraper.value = true
+  try {
+    const saved = await settingsApi.saveScraperSettings({
+      fetch_batch_size: Number(scraperForm.fetch_batch_size),
+      fetch_delay_seconds: Number(scraperForm.fetch_delay_seconds),
+      fetch_max_consecutive_errors: Number(scraperForm.fetch_max_consecutive_errors),
+    })
+    scraperForm.fetch_batch_size = saved.fetch_batch_size
+    scraperForm.fetch_delay_seconds = saved.fetch_delay_seconds
+    scraperForm.fetch_max_consecutive_errors = saved.fetch_max_consecutive_errors
+    flash('success', 'Scraper settings disimpan.')
+  } catch (error) {
+    flash('error', `Gagal menyimpan scraper settings: ${error.message}`)
+  } finally {
+    savingScraper.value = false
   }
 }
 
@@ -690,6 +732,71 @@ onMounted(loadAll)
             </div>
           </form>
         </div>
+      </section>
+
+      <!-- ========================= SCRAPER SETTINGS ========================= -->
+      <section class="mt-12">
+        <div class="mb-4 flex items-baseline justify-between">
+          <h2 class="text-lg font-semibold text-white">Scraper Settings</h2>
+          <span class="text-xs text-slate-500">dipakai oleh Fetch Batch di Workspace</span>
+        </div>
+
+        <form class="card space-y-4" @submit.prevent="saveScraperSettings">
+          <div class="grid gap-4 sm:grid-cols-3">
+            <div>
+              <label class="label" for="fetch-batch">Batch Size Default</label>
+              <input
+                id="fetch-batch"
+                v-model.number="scraperForm.fetch_batch_size"
+                class="input"
+                type="number"
+                min="1"
+                max="500"
+                step="1"
+              />
+              <p class="mt-1 text-[11px] text-slate-500">1–500 bab per klik Fetch Batch.</p>
+            </div>
+            <div>
+              <label class="label" for="fetch-delay">Jeda antar bab (detik)</label>
+              <input
+                id="fetch-delay"
+                v-model.number="scraperForm.fetch_delay_seconds"
+                class="input"
+                type="number"
+                min="0"
+                max="10"
+                step="0.1"
+              />
+              <p class="mt-1 text-[11px] text-slate-500">
+                Beri jeda agar situs sumber tidak memblokir (403/429).
+              </p>
+            </div>
+            <div>
+              <label class="label" for="fetch-errors">Batas error beruntun</label>
+              <input
+                id="fetch-errors"
+                v-model.number="scraperForm.fetch_max_consecutive_errors"
+                class="input"
+                type="number"
+                min="1"
+                max="20"
+                step="1"
+              />
+              <p class="mt-1 text-[11px] text-slate-500">
+                Job fetch berhenti otomatis setelah N error berturut-turut.
+              </p>
+            </div>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-3">
+            <button type="submit" class="btn-primary" :disabled="savingScraper">
+              {{ savingScraper ? 'Menyimpan…' : 'Simpan' }}
+            </button>
+            <span class="text-[11px] text-slate-500">
+              Perubahan berlaku untuk job fetch berikutnya.
+            </span>
+          </div>
+        </form>
       </section>
     </template>
   </div>

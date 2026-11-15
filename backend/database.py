@@ -6,6 +6,7 @@ per-task model routing table. Later phases add novel/chapter tables here.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -99,6 +100,12 @@ CREATE TABLE IF NOT EXISTS reading_progress (
     scroll_percent REAL    NOT NULL DEFAULT 0,
     updated_at     TEXT    NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS app_settings (
+    key        TEXT PRIMARY KEY,
+    value_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 """
 
 
@@ -177,6 +184,11 @@ def init_db(db_path: Path | str | None = None) -> Path:
                 """,
                 (task, config.DEFAULT_TEMPERATURE, config.DEFAULT_MAX_TOKENS, now),
             )
+        conn.execute(
+            "INSERT INTO app_settings (key, value_json, updated_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(key) DO NOTHING",
+            ("scraper", json.dumps(config.SCRAPER_SETTINGS_DEFAULTS), now),
+        )
     return path
 
 

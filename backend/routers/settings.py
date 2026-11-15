@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field, field_validator
 
 import config
 import database
+from core.app_settings import get_scraper_settings, save_scraper_settings
 from llm.base import LLMError
 from llm.registry import create_provider
 
@@ -97,6 +98,14 @@ class TaskOut(BaseModel):
 
 class TestRequest(BaseModel):
     model: str | None = None
+
+
+class ScraperSettingsPayload(BaseModel):
+    """Bounded so a typo cannot hammer a site or stall a job for hours."""
+
+    fetch_batch_size: int = Field(ge=1, le=500)
+    fetch_delay_seconds: float = Field(ge=0.0, le=10.0)
+    fetch_max_consecutive_errors: int = Field(ge=1, le=20)
 
 
 # --------------------------------------------------------------------------
@@ -198,6 +207,19 @@ def get_meta() -> dict[str, Any]:
             for task in config.TASKS
         ],
     }
+
+
+# --------------------------------------------------------------------------
+# Scraper settings
+# --------------------------------------------------------------------------
+@router.get("/scraper")
+def get_scraper_config() -> dict[str, Any]:
+    return get_scraper_settings()
+
+
+@router.put("/scraper")
+def put_scraper_config(payload: ScraperSettingsPayload) -> dict[str, Any]:
+    return save_scraper_settings(payload.model_dump())
 
 
 # --------------------------------------------------------------------------

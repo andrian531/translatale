@@ -23,6 +23,21 @@ export const novelsApi = {
       method: 'POST',
       body: JSON.stringify({ chapter_ids: chapterIds }),
     }),
+  addChaptersFromUrl: (id, urls) =>
+    request(`/novels/${id}/chapters/from-url`, {
+      method: 'POST',
+      body: JSON.stringify({ urls }),
+    }),
+  syncNovelChapters: (id, sourceUrl) =>
+    request(`/novels/${id}/chapters/sync-url`, {
+      method: 'POST',
+      body: JSON.stringify(sourceUrl ? { source_url: sourceUrl } : {}),
+    }),
+  startFetchJob: (id, { chapterIds = [], limit = null } = {}) =>
+    request(`/novels/${id}/chapters/fetch-job`, {
+      method: 'POST',
+      body: JSON.stringify({ chapter_ids: chapterIds, limit }),
+    }),
   uploadChapters: (id, files) => {
     const form = new FormData()
     for (const file of files) form.append('files', file)

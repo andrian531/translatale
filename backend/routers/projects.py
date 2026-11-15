@@ -10,6 +10,8 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field, field_validator
 
 import database
+from core import job_runner
+from core.app_settings import get_scraper_settings
 from scrapers.base import ScraperError
 from scrapers.registry import find_scraper, get_scraper
 
@@ -89,6 +91,27 @@ class ChapterUpdate(BaseModel):
 
 class FetchRequest(BaseModel):
     chapter_ids: list[int] = Field(default_factory=list)
+
+
+class ChaptersFromUrl(BaseModel):
+    urls: list[str] = Field(default_factory=list)
+
+    @field_validator("urls")
+    @classmethod
+    def _clean_urls(cls, value: list[str]) -> list[str]:
+        cleaned = [item.strip() for item in value if item and item.strip()]
+        if not cleaned:
+            raise ValueError("urls tidak boleh kosong")
+        return cleaned
+
+
+class SyncUrlRequest(BaseModel):
+    source_url: str | None = None
+
+
+class FetchJobRequest(BaseModel):
+    chapter_ids: list[int] = Field(default_factory=list)
+    limit: int | None = Field(default=None, ge=1, le=500)
 
 
 class NovelOut(BaseModel):
@@ -490,6 +513,206 @@ async def fetch_chapters(novel_id: int, payload: FetchRequest) -> dict[str, Any]
         )
 
     return {"ok": failed == 0, "fetched": fetched, "failed": failed, "errors": errors}
+
+
+# --------------------------------------------------------------------------
+# Chapters from URLs / TOC sync / batch fetch job
+# --------------------------------------------------------------------------
+def _scraper_for(url: str, novel_scraper: str):
+    """Pick the module that owns the URL, falling back to the novel's scraper."""
+    scraper = find_scraper(url)
+    if scraper.name == "generic" and novel_scraper:
+        return get_scraper(novel_scraper)
+    return scraper
+
+
+@router.post("/novels/{novel_id}/chapters/from-url")
+async def add_chapters_from_url(novel_id: int, payload: ChaptersFromUrl) -> dict[str, Any]:
+    with database.get_conn() as conn:
+        novel = dict(_get_novel(conn, novel_id))
+        existing = {
+            row["source_url"]
+            for row in conn.execute(
+                "SELECT source_url FROM chapters WHERE novel_id = ? AND source_url <> ''",
+                (novel_id,),
+            ).fetchall()
+        }
+        next_number = _next_chapter_number(conn, novel_id)
+
+    novel_scraper = (novel.get("scraper_name") or "").strip()
+    added: list[dict[str, Any]] = []
+    errors: list[dict[str, str]] = []
+    skipped = 0
+
+    for raw_url in payload.urls:
+        url = raw_url.strip()
+        if url in existing:
+            skipped += 1
+            continue
+
+        try:
+            scraper = _scraper_for(url, novel_scraper)
+            content = await scraper.fetch_chapter_content(url)
+        except ScraperError as exc:
+            errors.append({"url": url, "error": str(exc)})
+            continue
+
+        now = database.utcnow()
+        with database.get_conn() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO chapters (novel_id, chapter_number, title, title_translated,
+                                      source_url, raw_content, translated_content, status,
+                                      created_at, updated_at)
+                VALUES (?, ?, ?, '', ?, ?, '', 'raw', ?, ?)
+                """,
+                (
+                    novel_id,
+                    float(next_number),
+                    content.title or f"Bab {int(next_number)}",
+                    url,
+                    content.content,
+                    now,
+                    now,
+                ),
+            )
+            conn.execute(
+                "UPDATE novels SET updated_at = ? WHERE id = ?", (now, novel_id)
+            )
+        existing.add(url)
+        added.append(
+            {
+                "id": int(cursor.lastrowid or 0),
+                "chapter_number": float(next_number),
+                "title": content.title,
+                "url": url,
+                "chars": len(content.content),
+            }
+        )
+        next_number += 1
+
+    return {
+        "ok": not errors,
+        "added": len(added),
+        "skipped": skipped,
+        "failed": len(errors),
+        "chapters": added,
+        "errors": errors,
+    }
+
+
+@router.post("/novels/{novel_id}/chapters/sync-url")
+async def sync_chapters_from_source(
+    novel_id: int, payload: SyncUrlRequest | None = None
+) -> dict[str, Any]:
+    with database.get_conn() as conn:
+        novel = dict(_get_novel(conn, novel_id))
+        rows = conn.execute(
+            "SELECT chapter_number, source_url FROM chapters WHERE novel_id = ?", (novel_id,)
+        ).fetchall()
+
+    source_url = (payload.source_url if payload and payload.source_url else "").strip()
+    source_url = source_url or (novel.get("source_url") or "").strip()
+    if not source_url:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Novel ini tidak punya source_url. Isi source_url dulu atau kirim "
+                "source_url pada body request."
+            ),
+        )
+
+    novel_scraper = (novel.get("scraper_name") or "").strip()
+    scraper = _scraper_for(source_url, novel_scraper)
+    try:
+        listing = await scraper.fetch_chapter_list(source_url)
+    except ScraperError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    existing_urls = {row["source_url"] for row in rows if row["source_url"]}
+    existing_numbers = {float(row["chapter_number"]) for row in rows}
+
+    added: list[dict[str, Any]] = []
+    skipped = 0
+    now = database.utcnow()
+
+    for meta in listing:
+        url = (meta.url or "").strip()
+        number = float(meta.chapter_number)
+        if (url and url in existing_urls) or number in existing_numbers:
+            skipped += 1
+            continue
+
+        with database.get_conn() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO chapters (novel_id, chapter_number, title, title_translated,
+                                      source_url, raw_content, translated_content, status,
+                                      created_at, updated_at)
+                VALUES (?, ?, ?, '', ?, '', '', 'pending_fetch', ?, ?)
+                """,
+                (novel_id, number, meta.title, url, now, now),
+            )
+        existing_urls.add(url)
+        existing_numbers.add(number)
+        added.append(
+            {
+                "id": int(cursor.lastrowid or 0),
+                "chapter_number": number,
+                "title": meta.title,
+                "url": url,
+            }
+        )
+
+    if added:
+        with database.get_conn() as conn:
+            conn.execute("UPDATE novels SET updated_at = ? WHERE id = ?", (now, novel_id))
+
+    return {
+        "ok": True,
+        "source_url": source_url,
+        "scraper": scraper.name,
+        "found": len(listing),
+        "added": len(added),
+        "skipped": skipped,
+        "chapters": added,
+    }
+
+
+@router.post("/novels/{novel_id}/chapters/fetch-job", status_code=202)
+async def start_fetch_job(novel_id: int, payload: FetchJobRequest) -> dict[str, Any]:
+    """Background batch fetch with delay + circuit breaker (progress via SSE)."""
+    with database.get_conn() as conn:
+        _get_novel(conn, novel_id)
+
+        if payload.chapter_ids:
+            placeholders = ",".join("?" for _ in payload.chapter_ids)
+            found = conn.execute(
+                f"SELECT id FROM chapters WHERE novel_id = ? AND id IN ({placeholders})",
+                (novel_id, *payload.chapter_ids),
+            ).fetchall()
+            chapter_ids = [row["id"] for row in found]
+            if not chapter_ids:
+                raise HTTPException(status_code=404, detail="Tidak ada bab yang cocok")
+        else:
+            settings = get_scraper_settings()
+            limit = int(payload.limit or settings["fetch_batch_size"])
+            limit = max(1, min(limit, 500))
+            rows = conn.execute(
+                "SELECT id FROM chapters WHERE novel_id = ? AND status = 'pending_fetch' "
+                "ORDER BY chapter_number ASC, id ASC LIMIT ?",
+                (novel_id, limit),
+            ).fetchall()
+            chapter_ids = [row["id"] for row in rows]
+            if not chapter_ids:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Tidak ada bab berstatus 'pending_fetch' untuk di-fetch.",
+                )
+
+    job = await job_runner.start_job("fetch", novel_id, chapter_ids)
+    job["chapter_ids"] = chapter_ids
+    return job
 
 
 @router.get("/chapters/{chapter_id}", response_model=ChapterOut)

@@ -13,16 +13,23 @@ from typing import Any, AsyncIterator
 
 import database
 from core.analyzer import AnalysisError, analyze_novel, summarize_chapter_for_context
+from core.app_settings import get_scraper_settings
 from core.translator import TranslationError, translate_chapter
+from scrapers.base import ScraperError
+from scrapers.registry import find_scraper, get_scraper
 
 TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
-JOB_TYPES = frozenset({"story_analysis", "translate"})
+JOB_TYPES = frozenset({"story_analysis", "translate", "fetch"})
 
 HEARTBEAT_SECONDS = 15.0
 
 
 class JobError(RuntimeError):
     """Raised for unknown jobs or invalid job requests."""
+
+
+class FetchAborted(JobError):
+    """The circuit breaker tripped or nothing could be fetched."""
 
 
 @dataclass
@@ -239,6 +246,8 @@ async def _run(
 
         if job_type == "story_analysis":
             await _run_analysis(state, novel_id, chapter_ids, db_path)
+        elif job_type == "fetch":
+            await _run_fetch(state, novel_id, chapter_ids, db_path)
         else:
             await _run_translate(state, novel_id, chapter_ids, db_path)
 
@@ -342,6 +351,159 @@ async def _run_analysis(
                 "total_items": len(analyzed) or 1,
                 "message": f"{completed}/{len(analyzed)} bab dianalisis",
             },
+        )
+
+
+async def _run_fetch(
+    state: JobState,
+    novel_id: int,
+    chapter_ids: list[int] | None,
+    db_path: str | None,
+) -> None:
+    """Fetch chapter bodies one by one, with a delay and a circuit breaker."""
+    job_id = state.job_id
+    if not chapter_ids:
+        raise JobError("Tidak ada bab yang dipilih untuk di-fetch")
+
+    settings = get_scraper_settings(db_path)
+    delay = float(settings["fetch_delay_seconds"])
+    max_errors = int(settings["fetch_max_consecutive_errors"])
+    total = len(chapter_ids)
+
+    _update_job(job_id, total_items=total, message=f"0/{total} bab")
+    _publish(
+        job_id,
+        {
+            "type": "progress",
+            "total_items": total,
+            "completed_items": 0,
+            "message": f"0/{total} bab",
+        },
+    )
+
+    with database.get_conn(db_path) as conn:
+        row = conn.execute("SELECT * FROM novels WHERE id = ?", (novel_id,)).fetchone()
+    novel = dict(row) if row is not None else {}
+    scraper_name = (novel.get("scraper_name") or "").strip()
+
+    fetched = 0
+    failures: list[str] = []
+    consecutive_errors = 0
+    completed = 0
+
+    for index, chapter_id in enumerate(chapter_ids, start=1):
+        if state.cancelled:
+            raise asyncio.CancelledError
+
+        with database.get_conn(db_path) as conn:
+            chapter_row = conn.execute(
+                "SELECT id, chapter_number, title, source_url FROM chapters WHERE id = ?",
+                (chapter_id,),
+            ).fetchone()
+        if chapter_row is None:
+            failures.append(f"Bab {chapter_id} tidak ditemukan")
+            continue
+
+        chapter = dict(chapter_row)
+        label = _fmt_number(chapter["chapter_number"])
+        title = chapter["title"] or f"Bab {label}"
+
+        _update_job(job_id, current_chapter_id=chapter_id)
+        _publish(
+            job_id,
+            {
+                "type": "chapter",
+                "chapter_id": chapter_id,
+                "chapter_number": chapter["chapter_number"],
+                "chapter_title": title,
+                "message": f"Fetch bab {index}/{total}: {title}",
+            },
+        )
+
+        try:
+            url = (chapter["source_url"] or "").strip()
+            if not url:
+                raise ScraperError("Bab tidak punya source_url")
+            # Prefer the module that owns the URL; fall back to the novel's.
+            scraper = find_scraper(url)
+            if scraper.name == "generic" and scraper_name:
+                scraper = get_scraper(scraper_name)
+            content = await scraper.fetch_chapter_content(url)
+        except ScraperError as exc:
+            consecutive_errors += 1
+            failures.append(f"Bab {label}: {exc}")
+            with database.get_conn(db_path) as conn:
+                conn.execute(
+                    "UPDATE chapters SET status = 'error', updated_at = ? WHERE id = ?",
+                    (database.utcnow(), chapter_id),
+                )
+            completed += 1
+            _update_job(job_id, completed_items=completed)
+            _publish(
+                job_id,
+                {
+                    "type": "chapter_error",
+                    "chapter_id": chapter_id,
+                    "chapter_number": chapter["chapter_number"],
+                    "completed_items": completed,
+                    "total_items": total,
+                    "message": f"Bab {label} gagal: {exc}",
+                },
+            )
+            if consecutive_errors >= max_errors:
+                raise FetchAborted(
+                    f"Dihentikan setelah {consecutive_errors} error beruntun — kemungkinan "
+                    f"diblokir (403/429) atau struktur halaman berubah. "
+                    f"{fetched} bab yang sudah berhasil tetap tersimpan."
+                ) from exc
+        else:
+            consecutive_errors = 0
+            with database.get_conn(db_path) as conn:
+                conn.execute(
+                    """
+                    UPDATE chapters
+                       SET raw_content = ?, status = 'raw',
+                           title = CASE WHEN title = '' THEN ? ELSE title END,
+                           updated_at = ?
+                     WHERE id = ?
+                    """,
+                    (content.content, content.title, database.utcnow(), chapter_id),
+                )
+            fetched += 1
+            completed += 1
+            _update_job(job_id, completed_items=completed)
+            _publish(
+                job_id,
+                {
+                    "type": "chapter_done",
+                    "chapter_id": chapter_id,
+                    "chapter_number": chapter["chapter_number"],
+                    "chapter_title": title,
+                    "completed_items": completed,
+                    "total_items": total,
+                    "message": (
+                        f"Bab {label} tersimpan ({len(content.content)} karakter)"
+                    ),
+                },
+            )
+
+        # Be polite to the source site between requests.
+        if delay > 0 and index < total:
+            await asyncio.sleep(delay)
+
+    with database.get_conn(db_path) as conn:
+        conn.execute(
+            "UPDATE novels SET updated_at = ? WHERE id = ?", (database.utcnow(), novel_id)
+        )
+
+    if failures and fetched == 0:
+        raise FetchAborted(
+            f"Semua {len(failures)} bab gagal diambil. {failures[0]}"
+        )
+    if failures:
+        _publish(
+            job_id,
+            {"type": "warning", "message": f"{len(failures)} bab gagal: {failures[0]}"},
         )
 
 
