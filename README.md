@@ -2,6 +2,8 @@
 
 Web-based AI Novel Translator with modular per-site scrapers, multi-provider LLM routing, context-aware translation, and an integrated web reader.
 
+> **Background:** Translatale is an evolution and full rewrite of [andrian531/novel-translator](https://github.com/andrian531/novel-translator), carrying forward its context-aware, chunked, and reference-driven translation workflow onto a modern FastAPI + SQLite + Vue 3 architecture with modular per-site scrapers and multi-provider LLM routing.
+
 ## Planned Architecture
 
 - **Backend:** Python (FastAPI, SQLite, Playwright, BeautifulSoup4)
