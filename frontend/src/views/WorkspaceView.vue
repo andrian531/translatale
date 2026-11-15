@@ -57,7 +57,8 @@ const manualForm = reactive({ chapter_number: null, title: '', raw_content: '' }
 const savingManual = ref(false)
 
 const editing = ref(null)
-const editForm = reactive({ title: '', raw_content: '', translated_content: '' })
+const editForm = reactive({ title: '', source_url: '', raw_content: '', translated_content: '' })
+const editSourceUrlUnlocked = ref(false)
 const savingEdit = ref(false)
 const editPane = ref('both')
 
@@ -192,6 +193,22 @@ const selectedChapters = computed(() =>
 const translatableSelected = computed(() =>
   selectedChapters.value.filter((chapter) => (chapter.raw_content || '').trim()),
 )
+
+const TRANSLATE_BATCH_SIZE = 5
+const nextUntranslatedBatch = computed(() => {
+  const sorted = [...chapters.value].sort(
+    (a, b) => (a.chapter_number ?? 0) - (b.chapter_number ?? 0),
+  )
+  const translatedNos = sorted
+    .filter((c) => c.status === 'translated')
+    .map((c) => c.chapter_number ?? 0)
+  const lastTranslatedNo = translatedNos.length ? Math.max(...translatedNos) : -Infinity
+  const ready = sorted.filter(
+    (c) => c.status !== 'translated' && (c.raw_content || '').trim(),
+  )
+  const afterLast = ready.filter((c) => (c.chapter_number ?? 0) > lastTranslatedNo)
+  return (afterLast.length ? afterLast : ready).slice(0, TRANSLATE_BATCH_SIZE)
+})
 
 const pendingSelected = computed(() =>
   selectedChapters.value.filter((chapter) => chapter.status === 'pending_fetch'),
@@ -402,6 +419,12 @@ async function runTranslateWithIds(ids) {
   } catch (err) {
     flash('error', t('workspace.errors.startTranslate', { message: err.message }))
   }
+}
+
+async function startTranslateNext() {
+  const ids = nextUntranslatedBatch.value.map((chapter) => chapter.id)
+  if (!ids.length) return
+  await runTranslateWithIds(ids)
 }
 
 async function startTranslate() {
@@ -690,6 +713,8 @@ async function onFilesChosen(event) {
 function openChapter(chapter) {
   editing.value = chapter
   editForm.title = chapter.title
+  editForm.source_url = chapter.source_url || ''
+  editSourceUrlUnlocked.value = false
   editForm.raw_content = chapter.raw_content
   editForm.translated_content = chapter.translated_content
   editPane.value = 'both'
@@ -732,11 +757,15 @@ async function saveChapter() {
   if (!editing.value) return
   savingEdit.value = true
   try {
-    await novelsApi.updateChapter(editing.value.id, {
+    const payload = {
       title: editForm.title,
       raw_content: editForm.raw_content,
       translated_content: editForm.translated_content,
-    })
+    }
+    if (editSourceUrlUnlocked.value) {
+      payload.source_url = editForm.source_url
+    }
+    await novelsApi.updateChapter(editing.value.id, payload)
     editing.value = null
     await load()
     flash('success', t('workspace.notices.chapterSaved'))
@@ -1093,9 +1122,15 @@ onBeforeUnmount(stopStream)
                 <span v-if="novel.scraper_name" class="ml-2 font-mono text-slate-500">
                   ({{ novel.scraper_name }})
                 </span>
-                <p v-if="novel.source_url" class="mt-0.5 truncate font-mono text-slate-500">
+                <a
+                  v-if="novel.source_url"
+                  :href="novel.source_url"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="mt-0.5 block truncate font-mono text-indigo-400 hover:text-indigo-300 hover:underline"
+                >
                   {{ novel.source_url }}
-                </p>
+                </a>
               </div>
             </div>
           </div>
@@ -1381,6 +1416,13 @@ onBeforeUnmount(stopStream)
             @click="startTranslate"
           >
             {{ t('workspace.actions.translateSelected', { count: translatableSelected.length }) }}
+          </button>
+          <button
+            class="btn-primary"
+            :disabled="!nextUntranslatedBatch.length || jobActive"
+            @click="startTranslateNext"
+          >
+            {{ t('workspace.actions.translateNext', { count: nextUntranslatedBatch.length }) }}
           </button>
           <button
             class="btn-danger"
@@ -2422,9 +2464,46 @@ onBeforeUnmount(stopStream)
           </div>
         </div>
 
-        <div>
-          <label class="label" for="edit-title">{{ t('workspace.chapterModal.title') }}</label>
-          <input id="edit-title" v-model="editForm.title" class="input" type="text" />
+        <div class="grid gap-3 md:grid-cols-2">
+          <div>
+            <label class="label" for="edit-title">{{ t('workspace.chapterModal.title') }}</label>
+            <input id="edit-title" v-model="editForm.title" class="input" type="text" />
+          </div>
+          <div>
+            <div class="mb-1 flex items-center justify-between gap-2">
+              <label class="label !mb-0" for="edit-source-url">
+                {{ t('workspace.chapterModal.sourceUrl') }}
+              </label>
+              <label class="flex cursor-pointer items-center gap-1.5 text-[11px] text-slate-400">
+                <input
+                  v-model="editSourceUrlUnlocked"
+                  type="checkbox"
+                  class="h-3.5 w-3.5 rounded border-ink-600 bg-ink-850 text-indigo-600"
+                />
+                {{ t('workspace.chapterModal.unlockSourceUrl') }}
+              </label>
+            </div>
+            <div class="flex items-center gap-2">
+              <input
+                id="edit-source-url"
+                v-model="editForm.source_url"
+                class="input font-mono text-xs disabled:cursor-not-allowed disabled:opacity-60"
+                type="url"
+                :disabled="!editSourceUrlUnlocked"
+                :placeholder="t('workspace.chapterModal.sourceUrlPlaceholder')"
+              />
+              <a
+                v-if="editForm.source_url"
+                :href="editForm.source_url"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="btn-ghost shrink-0 !px-2.5 !py-2 text-xs"
+                title="Open URL"
+              >
+                ↗
+              </a>
+            </div>
+          </div>
         </div>
 
         <div class="grid gap-3" :class="editPane === 'both' ? 'lg:grid-cols-2' : 'grid-cols-1'">

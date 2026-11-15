@@ -47,6 +47,7 @@ export default {
     exportTxt: 'Export (.txt)',
     backupJson: 'Backup (.json)',
     translateSelected: 'Translate Selected ({count})',
+    translateNext: 'Translate Next ({count})',
     clearTranslations: 'Clear Translations ({count})',
     analyze: 'Story Analysis (AI)',
     autoReference: 'Auto-update reference',
@@ -196,6 +197,9 @@ export default {
   chapterModal: {
     sideBySide: 'Side by side',
     title: 'Title',
+    sourceUrl: 'Source URL',
+    sourceUrlPlaceholder: 'https://…',
+    unlockSourceUrl: 'Edit URL',
     rawLabel: 'Raw ({count} characters)',
     rawPlaceholder: 'No content yet — run Fetch Raw for this chapter.',
     translatedLabel: 'Translated ({count} characters)',

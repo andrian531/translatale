@@ -88,10 +88,16 @@ class ChapterManual(BaseModel):
 class ChapterUpdate(BaseModel):
     title: str | None = None
     title_translated: str | None = None
+    source_url: str | None = None
     raw_content: str | None = None
     translated_content: str | None = None
     status: ChapterStatus | None = None
     quality_score: float | None = None
+
+    @field_validator("source_url")
+    @classmethod
+    def _strip_source_url(cls, value: str | None) -> str | None:
+        return value.strip() if isinstance(value, str) else value
 
 
 class FetchRequest(BaseModel):

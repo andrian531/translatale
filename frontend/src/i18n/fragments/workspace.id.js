@@ -47,6 +47,7 @@ export default {
     exportTxt: 'Export (.txt)',
     backupJson: 'Backup (.json)',
     translateSelected: 'Translate Terpilih ({count})',
+    translateNext: 'Translate Berikutnya ({count})',
     clearTranslations: 'Hapus Terjemahan ({count})',
     analyze: 'Analisa Cerita (AI)',
     autoReference: 'Auto-update referensi',
@@ -196,6 +197,9 @@ export default {
   chapterModal: {
     sideBySide: 'Bersebelahan',
     title: 'Judul',
+    sourceUrl: 'URL Sumber',
+    sourceUrlPlaceholder: 'https://…',
+    unlockSourceUrl: 'Ubah URL',
     rawLabel: 'Raw ({count} karakter)',
     rawPlaceholder: 'Belum ada isi — jalankan Fetch Raw untuk bab ini.',
     translatedLabel: 'Translated ({count} karakter)',
