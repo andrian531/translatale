@@ -2,7 +2,7 @@
 
 **Bahasa:** [English](README.md) | Bahasa Indonesia
 
-Penerjemah Novel AI berbasis web dengan scraper modular per situs, routing LLM multi-provider, terjemahan sadar-konteks, dan web reader terintegrasi.
+**Translatale** (*Translate* + *Tale*) adalah penerjemah novel AI berbasis web dengan scraper modular per situs, routing LLM multi-provider, terjemahan sadar-konteks, dan web reader terintegrasi.
 
 > **Latar Belakang:** Translatale merupakan pengembangan dan penulisan ulang dari [andrian531/novel-translator](https://github.com/andrian531/novel-translator), meneruskan alur kerja terjemahan berbasis konteks, pemecahan chunk, dan referensi cerita ke atas arsitektur modern FastAPI + SQLite + Vue 3 dengan scraper modular per situs serta routing LLM multi-provider.
 
