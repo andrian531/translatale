@@ -58,6 +58,14 @@ const editForm = reactive({ title: '', raw_content: '', translated_content: '' }
 const savingEdit = ref(false)
 const editPane = ref('both')
 
+// -- synopsis panel -----------------------------------------------------
+const synopsisExpanded = ref(false)
+const showRawSynopsis = ref(false)
+const editingSynopsis = ref(false)
+const synopsisDraft = ref('')
+const savingSynopsis = ref(false)
+const refiningSynopsis = ref(false)
+
 const uploading = ref(false)
 const fileInput = ref(null)
 
@@ -116,6 +124,12 @@ const allVisibleSelected = computed(
     visibleChapters.value.length > 0 &&
     visibleChapters.value.every((chapter) => selected.value.includes(chapter.id)),
 )
+
+const displaySynopsis = computed(() => {
+  const translated = (novel.value?.synopsis_translated || '').trim()
+  const original = (novel.value?.synopsis || '').trim()
+  return translated || original
+})
 
 const JOB_LABELS = {
   translate: 'Translate',
@@ -328,6 +342,40 @@ async function fetchBatch() {
 function openUrlModal() {
   urlsText.value = ''
   showUrlModal.value = true
+}
+
+function startEditSynopsis() {
+  synopsisDraft.value = novel.value?.synopsis_translated || ''
+  editingSynopsis.value = true
+  synopsisExpanded.value = true
+}
+
+async function saveSynopsisEdit() {
+  savingSynopsis.value = true
+  try {
+    novel.value = await novelsApi.update(novelId.value, {
+      synopsis_translated: synopsisDraft.value,
+    })
+    editingSynopsis.value = false
+    flash('success', 'Sinopsis disimpan.')
+  } catch (err) {
+    flash('error', `Gagal menyimpan sinopsis: ${err.message}`)
+  } finally {
+    savingSynopsis.value = false
+  }
+}
+
+async function runRefineSynopsis() {
+  refiningSynopsis.value = true
+  try {
+    novel.value = await novelsApi.refineSynopsis(novelId.value)
+    synopsisExpanded.value = true
+    flash('success', 'Sinopsis diperbaiki memakai konteks cerita.')
+  } catch (err) {
+    flash('error', `Gagal memperbaiki sinopsis: ${err.message}`)
+  } finally {
+    refiningSynopsis.value = false
+  }
 }
 
 async function addFromUrls() {
@@ -648,6 +696,108 @@ onBeforeUnmount(stopStream)
           </button>
         </div>
       </header>
+
+      <!-- ============================ SYNOPIS ============================ -->
+      <section class="card mb-5">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div class="min-w-0 flex-1">
+            <h2 class="flex flex-wrap items-center gap-2 text-sm font-semibold text-white">
+              Sinopsis
+              <span
+                v-if="novel.synopsis_translated"
+                class="badge bg-emerald-950/50 text-emerald-400"
+              >
+                terjemahan
+              </span>
+              <span
+                v-else-if="novel.synopsis"
+                class="badge bg-amber-950/50 text-amber-400"
+              >
+                belum diterjemahkan
+              </span>
+            </h2>
+            <p
+              v-if="displaySynopsis"
+              class="mt-1 whitespace-pre-line text-xs leading-relaxed text-slate-400"
+              :class="{ 'line-clamp-3': !synopsisExpanded }"
+            >
+              {{ displaySynopsis }}
+            </p>
+            <p v-else class="mt-1 text-xs text-slate-500">Novel ini belum punya sinopsis.</p>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-2">
+            <button
+              v-if="displaySynopsis"
+              class="btn-ghost !px-2.5 !py-1 text-[11px]"
+              @click="synopsisExpanded = !synopsisExpanded"
+            >
+              {{ synopsisExpanded ? 'Ringkas' : 'Baca semua' }}
+            </button>
+            <button
+              v-if="novel.synopsis"
+              class="btn-ghost !px-2.5 !py-1 text-[11px]"
+              @click="showRawSynopsis = !showRawSynopsis"
+            >
+              {{ showRawSynopsis ? 'Sembunyikan asli' : 'Lihat asli' }}
+            </button>
+            <button class="btn-ghost !px-2.5 !py-1 text-[11px]" @click="startEditSynopsis">
+              Edit
+            </button>
+            <button
+              class="btn-primary !px-2.5 !py-1 text-[11px]"
+              :disabled="!novel.has_story_analysis || refiningSynopsis"
+              :title="
+                novel.has_story_analysis
+                  ? 'Perbaiki tata bahasa sinopsis memakai istilah dari Analisa Cerita'
+                  : 'Jalankan Analisa Cerita terlebih dahulu'
+              "
+              @click="runRefineSynopsis"
+            >
+              {{ refiningSynopsis ? 'Memperbaiki…' : 'Perbaiki Sinopsis' }}
+            </button>
+          </div>
+        </div>
+
+        <p v-if="!novel.has_story_analysis" class="mt-2 text-[11px] text-amber-500/80">
+          <span class="font-medium text-amber-400">Perbaiki Sinopsis</span> aktif setelah
+          <span class="text-amber-400">Analisa Cerita (AI)</span> dijalankan.
+        </p>
+
+        <div v-if="showRawSynopsis" class="mt-3 rounded-lg border border-ink-800 bg-ink-850 p-3">
+          <p class="mb-1 text-[11px] uppercase tracking-wide text-slate-500">
+            Sinopsis asli ({{ novel.source_lang }})
+          </p>
+          <p class="whitespace-pre-line text-xs leading-relaxed text-slate-400">
+            {{ novel.synopsis || '—' }}
+          </p>
+        </div>
+
+        <div v-if="editingSynopsis" class="mt-3 space-y-2">
+          <label class="label" for="synopsis-edit">Edit sinopsis terjemahan</label>
+          <textarea
+            id="synopsis-edit"
+            v-model="synopsisDraft"
+            class="input h-32 resize-y text-xs"
+            placeholder="Tulis sinopsis terjemahan…"
+          />
+          <div class="flex justify-end gap-2">
+            <button
+              class="btn-ghost !px-2.5 !py-1 text-[11px]"
+              @click="editingSynopsis = false"
+            >
+              Batal
+            </button>
+            <button
+              class="btn-primary !px-2.5 !py-1 text-[11px]"
+              :disabled="savingSynopsis"
+              @click="saveSynopsisEdit"
+            >
+              {{ savingSynopsis ? 'Menyimpan…' : 'Simpan Sinopsis' }}
+            </button>
+          </div>
+        </div>
+      </section>
 
       <!-- tabs -->
       <div class="mb-5 flex gap-1 border-b border-ink-800">

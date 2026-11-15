@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS novels (
     source_url       TEXT    NOT NULL DEFAULT '',
     scraper_name     TEXT    NOT NULL DEFAULT '',
     synopsis         TEXT    NOT NULL DEFAULT '',
+    synopsis_translated TEXT NOT NULL DEFAULT '',
     created_at       TEXT    NOT NULL,
     updated_at       TEXT    NOT NULL
 );
@@ -147,6 +148,7 @@ def get_conn(db_path: Path | str | None = None) -> Iterator[sqlite3.Connection]:
 #: databases need an explicit ``ALTER TABLE``.
 COLUMN_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("provider_configs", "available_models", "TEXT NOT NULL DEFAULT '[]'"),
+    ("novels", "synopsis_translated", "TEXT NOT NULL DEFAULT ''"),
 )
 
 

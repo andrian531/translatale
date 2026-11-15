@@ -12,6 +12,8 @@ from pydantic import BaseModel, Field, field_validator
 import database
 from core import job_runner
 from core.app_settings import get_scraper_settings
+from core.synopsis import SynopsisError, refine_synopsis, translate_metadata
+from llm.base import TaskNotConfiguredError
 from scrapers.base import ScraperError
 from scrapers.registry import find_scraper, get_scraper
 
@@ -50,6 +52,7 @@ class NovelUpdate(BaseModel):
     source_lang: str | None = None
     target_lang: str | None = None
     synopsis: str | None = None
+    synopsis_translated: str | None = None
 
 
 class NovelFromUrl(BaseModel):
@@ -125,6 +128,7 @@ class NovelOut(BaseModel):
     source_url: str
     scraper_name: str
     synopsis: str
+    synopsis_translated: str = ""
     created_at: str
     updated_at: str
     chapter_count: int = 0
@@ -132,6 +136,7 @@ class NovelOut(BaseModel):
     translated_count: int = 0
     pending_count: int = 0
     last_read_chapter_id: int | None = None
+    has_story_analysis: bool = False
 
 
 class ChapterOut(BaseModel):
@@ -158,7 +163,17 @@ SELECT n.*,
        (SELECT COUNT(*) FROM chapters c WHERE c.novel_id = n.id AND c.status = 'raw') AS raw_count,
        (SELECT COUNT(*) FROM chapters c WHERE c.novel_id = n.id AND c.status = 'translated') AS translated_count,
        (SELECT COUNT(*) FROM chapters c WHERE c.novel_id = n.id AND c.status = 'pending_fetch') AS pending_count,
-       (SELECT rp.chapter_id FROM reading_progress rp WHERE rp.novel_id = n.id) AS last_read_chapter_id
+       (SELECT rp.chapter_id FROM reading_progress rp WHERE rp.novel_id = n.id) AS last_read_chapter_id,
+       EXISTS(
+           SELECT 1 FROM novel_references r
+            WHERE r.novel_id = n.id
+              AND (
+                    r.characters_json NOT IN ('', '[]')
+                 OR r.locations_json NOT IN ('', '[]')
+                 OR r.terms_json NOT IN ('', '[]')
+                 OR trim(r.translation_guide) <> ''
+              )
+       ) AS has_story_analysis
 FROM novels AS n
 """
 
@@ -226,23 +241,34 @@ def list_novels() -> list[NovelOut]:
 
 
 @router.post("/novels", response_model=NovelOut, status_code=201)
-def create_novel(payload: NovelCreate) -> NovelOut:
+async def create_novel(payload: NovelCreate) -> NovelOut:
+    # Best effort: a missing/unreachable translate task must not block creation.
+    translated = await translate_metadata(
+        title=payload.title,
+        synopsis=payload.synopsis,
+        source_lang=payload.source_lang,
+        target_lang=payload.target_lang,
+        need_title=not (payload.title_translated or "").strip(),
+    )
+    title_translated = (payload.title_translated or "").strip() or translated["title_translated"]
+
     now = database.utcnow()
     with database.get_conn() as conn:
         cursor = conn.execute(
             """
             INSERT INTO novels (title, title_translated, author, source_lang, target_lang,
                                 source_type, source_url, scraper_name, synopsis,
-                                created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, 'manual', '', '', ?, ?, ?)
+                                synopsis_translated, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, 'manual', '', '', ?, ?, ?, ?)
             """,
             (
                 payload.title,
-                payload.title_translated,
+                title_translated,
                 payload.author,
                 payload.source_lang,
                 payload.target_lang,
                 payload.synopsis,
+                translated["synopsis_translated"],
                 now,
                 now,
             ),
@@ -259,23 +285,33 @@ async def create_novel_from_url(payload: NovelFromUrl) -> NovelOut:
     except ScraperError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    source_lang = payload.source_lang or info.source_lang
+    translated = await translate_metadata(
+        title=info.title,
+        synopsis=info.synopsis,
+        source_lang=source_lang,
+        target_lang=payload.target_lang,
+    )
+
     now = database.utcnow()
     with database.get_conn() as conn:
         cursor = conn.execute(
             """
             INSERT INTO novels (title, title_translated, author, source_lang, target_lang,
                                 source_type, source_url, scraper_name, synopsis,
-                                created_at, updated_at)
-            VALUES (?, '', ?, ?, ?, 'scraper', ?, ?, ?, ?, ?)
+                                synopsis_translated, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, 'scraper', ?, ?, ?, ?, ?, ?)
             """,
             (
                 info.title,
+                translated["title_translated"],
                 info.author,
-                payload.source_lang or info.source_lang,
+                source_lang,
                 payload.target_lang,
                 payload.url,
                 scraper.name,
                 info.synopsis,
+                translated["synopsis_translated"],
                 now,
                 now,
             ),
@@ -324,6 +360,41 @@ def delete_novel(novel_id: int) -> dict[str, Any]:
         conn.execute("DELETE FROM chapters WHERE novel_id = ?", (novel_id,))
         conn.execute("DELETE FROM novels WHERE id = ?", (novel_id,))
     return {"ok": True, "deleted_id": novel_id}
+
+
+@router.post("/novels/{novel_id}/synopsis/refine", response_model=NovelOut)
+async def refine_novel_synopsis(novel_id: int) -> NovelOut:
+    """Polish the synopsis translation using the story reference sheet."""
+    with database.get_conn() as conn:
+        row = _get_novel(conn, novel_id)
+
+    if not row["has_story_analysis"]:
+        raise HTTPException(
+            status_code=400,
+            detail="Lakukan Analisa Cerita awal terlebih dahulu sebelum memperbaiki sinopsis.",
+        )
+
+    if not ((row["synopsis"] or "").strip() or (row["synopsis_translated"] or "").strip()):
+        raise HTTPException(
+            status_code=400,
+            detail="Novel ini belum punya sinopsis. Isi sinopsis dulu sebelum memperbaikinya.",
+        )
+
+    try:
+        await refine_synopsis(novel_id)
+    except TaskNotConfiguredError as exc:
+        raise HTTPException(
+            status_code=424,
+            detail=(
+                "Task 'translate' belum dikonfigurasi. Buka Settings → Model Routing "
+                f"per Proses dan pilih provider + model untuk Translate. ({exc})"
+            ),
+        ) from exc
+    except SynopsisError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    with database.get_conn() as conn:
+        return _novel_out(_get_novel(conn, novel_id))
 
 
 # --------------------------------------------------------------------------

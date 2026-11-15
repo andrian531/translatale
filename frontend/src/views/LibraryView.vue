@@ -225,6 +225,13 @@ onMounted(load)
           {{ novel.author || 'Penulis tidak diketahui' }}
         </p>
 
+        <p
+          v-if="novel.synopsis_translated || novel.synopsis"
+          class="line-clamp-2 text-[11px] leading-relaxed text-slate-500"
+        >
+          {{ novel.synopsis_translated || novel.synopsis }}
+        </p>
+
         <p class="font-mono text-[11px] text-slate-500">
           {{ novel.source_lang }} → {{ novel.target_lang }}
           <span v-if="novel.scraper_name"> · {{ novel.scraper_name }}</span>

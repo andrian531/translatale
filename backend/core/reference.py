@@ -236,5 +236,21 @@ def reference_to_prompt(reference: dict[str, Any], max_characters: int = 40) -> 
     return "\n\n".join(parts)
 
 
+def has_story_analysis(novel_id: int, db_path: str | None = None) -> bool:
+    """True once the reference sheet holds anything the analyst produced."""
+    with database.get_conn(db_path) as conn:
+        row = conn.execute(
+            "SELECT characters_json, locations_json, terms_json, translation_guide "
+            "FROM novel_references WHERE novel_id = ?",
+            (novel_id,),
+        ).fetchone()
+    if row is None:
+        return False
+    for field in ("characters_json", "locations_json", "terms_json"):
+        if _loads(row[field], []):
+            return True
+    return bool((row["translation_guide"] or "").strip())
+
+
 def row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
     return dict(row) if row is not None else None
