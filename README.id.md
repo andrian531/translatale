@@ -4,7 +4,7 @@
 
 **Translatale** (*Translate* + *Tale*) adalah aplikasi **penerjemah novel AI** dan **web reader** open-source yang berjalan lokal untuk menerjemahkan web novel / light novel Mandarin, Jepang, dan Korea dengan nama karakter, glosarium, dan alur cerita yang konsisten—didukung oleh **Gemini, OpenAI, DeepSeek, OpenRouter, Anthropic, Ollama, maupun API OpenAI-compatible lainnya**.
 
-Mulai dari mengambil bab otomatis (*scraping*), menyusun lembar referensi cerita, membuat prompt ilustrasi cover novel, hingga mengekspor buku siap baca ke format `.epub` / `.txt`, semuanya tersedia dalam satu antarmuka web modern.
+Mulai dari mengambil bab otomatis (*scraping*), menyusun lembar referensi cerita, membuat prompt ilustrasi cover novel, hingga mengekspor buku siap baca ke format `.epub`, `.pdf`, dan `.txt` (lengkap dengan cover), semuanya tersedia dalam satu antarmuka web modern.
 
 > **Latar Belakang:** Translatale merupakan pengembangan dan penulisan ulang dari [andrian531/novel-translator](https://github.com/andrian531/novel-translator), meneruskan alur kerja terjemahan berbasis konteks, pemecahan chunk, dan referensi cerita ke atas arsitektur modern FastAPI + SQLite + Vue 3 dengan scraper modular per situs, routing LLM multi-provider, serta UI dwibahasa (EN/ID) bertema Gelap/Terang.
 
@@ -12,7 +12,7 @@ Mulai dari mengambil bab otomatis (*scraping*), menyusun lembar referensi cerita
 
 - **Nama & Istilah Konsisten:** Analisa cerita AI otomatis membangun **Lembar Referensi** hidup (karakter, julukan, relasi, lokasi, istilah/glosarium, dan panduan gaya bahasa) yang disuntikkan ke setiap prompt terjemahan.
 - **Bebas Pilih Banyak LLM:** Gunakan provider/model berbeda untuk tiap proses—lengkap dengan **Default Provider & Model** otomatis serta **Model Cadangan (*Fallback*)** opsional (mis. model *uncensored*) saat model utama menolak atau gagal.
-- **Nyaman untuk Novel Panjang (Ratusan Bab):** Job latar belakang dengan log SSE detail, tombol sekali klik **Translate Berikutnya (5)**, **Apply Reference paralel 5 bab sekaligus**, tabel bab dengan pencarian & pagination, serta ekspor `.epub` / `.txt`.
+- **Nyaman untuk Novel Panjang (Ratusan Bab):** Job latar belakang dengan log SSE detail, tombol sekali klik **Translate Berikutnya (5)**, **Apply Reference paralel 5 bab sekaligus**, tabel bab dengan pencarian & pagination, serta ekspor `.epub` / `.pdf` / `.txt` / `.json`.
 
 ## Arsitektur
 
@@ -45,7 +45,7 @@ Mulai dari mengambil bab otomatis (*scraping*), menyusun lembar referensi cerita
   - Buat **Prompt Gambar Cover 2:3** yang detail dari sinopsis & referensi cerita dalam 2 format siap pakai: **Positive + Negative Prompt** dan **JSON Prompt** terstruktur.
 - **Tabel Bab Workspace & Web Reader:**
   - **Pagination** (`25/50/100/200`), **pencarian cepat** nomor/judul bab, **sorting kolom**, tombol aksi responsif (ikon/teks), serta edit `URL Sumber` per bab dengan checkbox pengaman.
-  - **Web Reader** terintegrasi dengan tema baca independen (Gelap / Sepia / Terang), pengaturan font, pelacakan progres baca, serta ekspor `.txt` / `.epub`.
+  - **Web Reader** terintegrasi dengan tema baca independen (Gelap / Sepia / Terang), pengaturan font, pelacakan progres baca, serta ekspor ke **`.epub`**, **`.pdf`** (dengan halaman cover & bab dimulai di halaman baru), **`.txt`**, dan backup **`.json`**.
 
 ## Menjalankan Aplikasi
 

@@ -250,7 +250,7 @@ def test_export_unknown_novel_404(client):
 
 def test_export_invalid_format_rejected(client):
     novel = _create_novel(client)
-    assert client.get(f"/api/novels/{novel['id']}/export?format=pdf").status_code == 422
+    assert client.get(f"/api/novels/{novel['id']}/export?format=docx").status_code == 422
 
 
 def test_export_filename_is_sanitised(client):
@@ -285,3 +285,62 @@ def test_export_txt_does_not_double_chapter_prefix(client):
     body = client.get(f"/api/novels/{novel['id']}/export?format=txt").text
     assert "Bab 1: Bab 1: Awal" not in body
     assert "Bab 1: Awal" in body
+
+
+def test_export_epub_and_pdf_with_cover(client):
+    import io
+    import zipfile
+
+    novel = _create_novel(client, title="Test Novel")
+    # Minimal valid 1x1 PNG
+    png_bytes = (
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+        b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc```\x00\x00"
+        b"\x00\x04\x00\x01\xf6\x178U\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+    upload = client.post(
+        f"/api/novels/{novel['id']}/cover",
+        files={"file": ("cover.png", png_bytes, "image/png")},
+    )
+    assert upload.status_code == 200
+
+    chapter = _add_chapter(client, novel["id"], "第1章", "raw", number=1)
+    _mark_translated(chapter["id"], "Paragraf pertama.\n\nParagraf kedua.", "Bab 1: Mulai")
+
+    epub_resp = client.get(f"/api/novels/{novel['id']}/export?format=epub")
+    assert epub_resp.status_code == 200
+    assert epub_resp.headers["content-type"].startswith("application/epub+zip")
+    with zipfile.ZipFile(io.BytesIO(epub_resp.content)) as zf:
+        names = set(zf.namelist())
+        assert "mimetype" in names
+        assert "OEBPS/content.opf" in names
+        assert "OEBPS/cover.xhtml" in names
+        assert "OEBPS/cover.png" in names
+        assert "OEBPS/chap_0001.xhtml" in names
+        assert "Paragraf pertama." in zf.read("OEBPS/chap_0001.xhtml").decode("utf-8")
+
+    pdf_resp = client.get(f"/api/novels/{novel['id']}/export?format=pdf")
+    assert pdf_resp.status_code == 200
+    assert pdf_resp.headers["content-type"].startswith("application/pdf")
+    assert pdf_resp.content.startswith(b"%PDF-")
+
+
+def test_export_pdf_starts_each_chapter_on_new_page_and_uses_translated_title(client):
+    novel = _create_novel(client, title="世界变异")
+    with database.get_conn() as conn:
+        conn.execute(
+            "UPDATE novels SET title_translated = ? WHERE id = ?",
+            ("Dunia Bermutasi", novel["id"]),
+        )
+
+    c1 = _add_chapter(client, novel["id"], "第1章", "raw 1", number=1)
+    c2 = _add_chapter(client, novel["id"], "第2章", "raw 2", number=2)
+    _mark_translated(c1["id"], "Isi singkat bab satu.", "Bab 1: Awal")
+    _mark_translated(c2["id"], "Isi singkat bab dua.", "Bab 2: Lanjut")
+
+    pdf_resp = client.get(f"/api/novels/{novel['id']}/export?format=pdf")
+    assert pdf_resp.status_code == 200
+    assert "Dunia%20Bermutasi.pdf" in pdf_resp.headers["content-disposition"]
+    # Title page + 2 chapters = 3 pages (each chapter starts on its own page)
+    page_count = pdf_resp.content.count(b"/Type /Page") - pdf_resp.content.count(b"/Type /Pages")
+    assert page_count >= 3

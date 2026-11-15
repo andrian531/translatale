@@ -738,11 +738,22 @@ async function downloadExport(format) {
       }
       throw new Error(detail)
     }
+    const disposition = response.headers.get('Content-Disposition') || ''
+    const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i)
+    const asciiMatch = disposition.match(/filename="([^"]+)"/i)
+    const headerFilename = utf8Match
+      ? decodeURIComponent(utf8Match[1])
+      : asciiMatch
+        ? asciiMatch[1]
+        : ''
+    const fallbackTitle = (novel.value?.title_translated || novel.value?.title || 'novel')
+      .replace(/[\\/:*?"<>|]+/g, '_')
+      .trim() || 'novel'
     const blob = await response.blob()
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = `${novel.value?.title || 'novel'}.${format}`
+    link.download = headerFilename || `${fallbackTitle}.${format}`
     document.body.appendChild(link)
     link.click()
     link.remove()
@@ -1193,6 +1204,12 @@ onBeforeUnmount(stopStream)
           </button>
           <button class="btn-ghost !px-3 !py-1.5 text-xs" @click="downloadExport('txt')">
             {{ t('workspace.actions.exportTxt') }}
+          </button>
+          <button class="btn-ghost !px-3 !py-1.5 text-xs" @click="downloadExport('epub')">
+            {{ t('workspace.actions.exportEpub') }}
+          </button>
+          <button class="btn-ghost !px-3 !py-1.5 text-xs" @click="downloadExport('pdf')">
+            {{ t('workspace.actions.exportPdf') }}
           </button>
           <button class="btn-ghost !px-3 !py-1.5 text-xs" @click="downloadExport('json')">
             {{ t('workspace.actions.backupJson') }}

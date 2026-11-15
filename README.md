@@ -4,7 +4,7 @@
 
 **Translatale** (*Translate* + *Tale*) is an open-source, self-hosted **AI Novel Translator** and **Web Novel Reader** built for translating Chinese, Japanese, and Korean web novels / light novels (raws) with consistent character names, glossaries, and story context—powered by **Gemini, OpenAI, DeepSeek, OpenRouter, Anthropic, Ollama, or any OpenAI-compatible LLM**.
 
-Whether you want to scrape raw chapters automatically, maintain a persistent story bible, generate book cover prompts, or export polished `.epub` / `.txt` books for offline reading, Translatale brings the entire workflow into one clean web app.
+Whether you want to scrape raw chapters automatically, maintain a persistent story bible, generate book cover prompts, or export polished `.epub`, `.pdf`, and `.txt` books (with cover image) for offline reading, Translatale brings the entire workflow into one clean web app.
 
 > **Background:** Translatale is an evolution and full rewrite of [andrian531/novel-translator](https://github.com/andrian531/novel-translator), carrying forward its context-aware, chunked, and reference-driven translation workflow onto a modern FastAPI + SQLite + Vue 3 architecture with modular per-site scrapers, multi-provider LLM routing, and a bilingual Dark/Light UI.
 
@@ -12,7 +12,7 @@ Whether you want to scrape raw chapters automatically, maintain a persistent sto
 
 - **Consistent Names & Terminology:** Automatic AI story analysis builds a living **Reference Sheet** (characters, aliases, relationships, locations, terms, and translation guide) that is injected into every translation prompt.
 - **Zero-Cost Lock-in & Multi-LLM Routing:** Mix and match any LLM provider per task—including a **Default Provider & Model** fallback and an optional **Secondary Fallback Model** (e.g., an uncensored model) when primary models refuse or fail.
-- **Built for Long Novels (100+ Chapters):** Background jobs with real-time SSE logs, one-click **Translate Next (5)**, **5-way parallel Apply Reference**, paginated & searchable chapter tables, and `.epub` / `.txt` export.
+- **Built for Long Novels (100+ Chapters):** Background jobs with real-time SSE logs, one-click **Translate Next (5)**, **5-way parallel Apply Reference**, paginated & searchable chapter tables, and `.epub` / `.pdf` / `.txt` / `.json` export.
 
 ## Architecture
 
@@ -45,7 +45,7 @@ Whether you want to scrape raw chapters automatically, maintain a persistent sto
   - Generate detailed **2:3 Cover Image Prompts** from your novel's synopsis and reference sheet in two ready-to-use formats: **Positive + Negative Prompt** and structured **JSON Prompt**.
 - **Workspace Chapter Table & Web Reader:**
   - Fast client-side **pagination** (`25/50/100/200`), **quick search** by chapter `#` or title, **column sorting**, responsive icon/text action buttons, and safety-locked chapter `Source URL` editing.
-  - Integrated **Web Reader** with independent Dark / Sepia / Light reading themes, font controls, reading progress tracking, and `.txt` / `.epub` export.
+  - Integrated **Web Reader** with independent Dark / Sepia / Light reading themes, font controls, reading progress tracking, and one-click export to **`.epub`**, **`.pdf`** (with full-page cover & per-chapter page breaks), **`.txt`**, and **`.json`** backup.
 
 ## Running
 

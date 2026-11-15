@@ -1,4 +1,4 @@
-"""Reading progress and novel export (txt / json backup)."""
+"""Reading progress and novel export (txt / epub / pdf / json backup)."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 
 import database
+from core.exporter import build_epub, build_pdf, format_chapter_heading
 from core.reference import load_reference
 
 router = APIRouter(prefix="/api", tags=["reader"])
@@ -126,7 +127,7 @@ def put_progress(novel_id: int, payload: ProgressPayload) -> dict[str, Any]:
 @router.get("/novels/{novel_id}/export")
 def export_novel(
     novel_id: int,
-    format: Literal["txt", "json"] = Query(default="txt"),
+    format: Literal["txt", "json", "epub", "pdf"] = Query(default="txt"),
 ) -> Response:
     novel = _require_novel(novel_id)
 
@@ -161,8 +162,28 @@ def export_novel(
             status_code=400,
             detail=(
                 "Belum ada bab berstatus 'translated'. Terjemahkan minimal satu bab "
-                "sebelum mengekspor .txt."
+                f"sebelum mengekspor .{format}."
             ),
+        )
+
+    export_title = novel.get("title_translated") or novel["title"]
+
+    if format == "epub":
+        epub_bytes = build_epub(novel, translated)
+        filename = f"{_safe_filename(export_title)}.epub"
+        return Response(
+            content=epub_bytes,
+            media_type="application/epub+zip",
+            headers=_attachment(filename, fallback=f"novel-{novel_id}.epub"),
+        )
+
+    if format == "pdf":
+        pdf_bytes = build_pdf(novel, translated)
+        filename = f"{_safe_filename(export_title)}.pdf"
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers=_attachment(filename, fallback=f"novel-{novel_id}.pdf"),
         )
 
     lines: list[str] = [novel["title"]]
@@ -175,14 +196,7 @@ def export_novel(
     lines.append("")
 
     for chapter in translated:
-        heading = chapter.get("title_translated") or chapter.get("title") or ""
-        number = chapter["chapter_number"]
-        number_label = int(number) if float(number) == int(number) else number
-        # A translated title often already carries its own "Bab N:" prefix.
-        if re.match(r"^\s*(bab|chapter|第)\s*\d", heading, re.IGNORECASE):
-            lines.append(heading)
-        else:
-            lines.append(f"Bab {number_label}" + (f": {heading}" if heading else ""))
+        lines.append(format_chapter_heading(chapter))
         lines.append("")
         lines.append((chapter.get("translated_content") or "").strip())
         lines.append("")

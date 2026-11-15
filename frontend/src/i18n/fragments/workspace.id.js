@@ -45,6 +45,8 @@ export default {
   actions: {
     read: 'Baca',
     exportTxt: 'Export (.txt)',
+    exportEpub: 'Export (.epub)',
+    exportPdf: 'Export (.pdf)',
     backupJson: 'Backup (.json)',
     translateSelected: 'Translate Terpilih ({count})',
     translateNext: 'Translate Berikutnya ({count})',

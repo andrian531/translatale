@@ -45,6 +45,8 @@ export default {
   actions: {
     read: 'Read',
     exportTxt: 'Export (.txt)',
+    exportEpub: 'Export (.epub)',
+    exportPdf: 'Export (.pdf)',
     backupJson: 'Backup (.json)',
     translateSelected: 'Translate Selected ({count})',
     translateNext: 'Translate Next ({count})',
