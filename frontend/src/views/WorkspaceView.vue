@@ -87,6 +87,7 @@ const filters = [
   { value: 'raw', labelKey: 'common.status.raw' },
   { value: 'translating', labelKey: 'common.status.translating' },
   { value: 'translated', labelKey: 'common.status.translated' },
+  { value: 'needs_review', labelKey: 'workspace.filters.needsReview' },
   { value: 'error', labelKey: 'common.status.error' },
 ]
 
@@ -134,7 +135,11 @@ function sortIndicator(key) {
 const visibleChapters = computed(() => {
   const q = searchQuery.value.trim().toLowerCase()
   const filtered = chapters.value.filter((chapter) => {
-    if (filter.value !== 'all' && chapter.status !== filter.value) return false
+    if (filter.value === 'needs_review') {
+      if (!chapter.needs_review) return false
+    } else if (filter.value !== 'all' && chapter.status !== filter.value) {
+      return false
+    }
     if (!q) return true
     const num = String(chapter.chapter_number ?? '')
     const title = (chapter.title || '').toLowerCase()
@@ -1563,7 +1568,9 @@ onBeforeUnmount(stopStream)
                 {{
                   item.value === 'all'
                     ? chapters.length
-                    : chapters.filter((c) => c.status === item.value).length
+                    : item.value === 'needs_review'
+                      ? chapters.filter((c) => c.needs_review).length
+                      : chapters.filter((c) => c.status === item.value).length
                 }}
               </span>
             </button>
@@ -1587,6 +1594,29 @@ onBeforeUnmount(stopStream)
               ✕
             </button>
           </div>
+        </div>
+
+        <div
+          v-if="chapters.some((c) => c.needs_review)"
+          class="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-700/70 bg-amber-950/30 px-3 py-2 text-xs text-amber-300"
+        >
+          <div class="flex items-center gap-2">
+            <span
+              class="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-amber-700/70 bg-amber-950/60 text-[10px] font-bold text-amber-400"
+              aria-hidden="true"
+            >
+              !
+            </span>
+            <span>{{ t('workspace.chapterModal.tableReviewNotice') }}</span>
+          </div>
+          <button
+            v-if="filter !== 'needs_review'"
+            type="button"
+            class="shrink-0 font-medium text-amber-400 underline hover:opacity-80"
+            @click="filter = 'needs_review'"
+          >
+            {{ t('workspace.filters.needsReview') }} ({{ chapters.filter((c) => c.needs_review).length }})
+          </button>
         </div>
 
         <div class="overflow-hidden rounded-xl border border-ink-700">
@@ -1670,12 +1700,24 @@ onBeforeUnmount(stopStream)
                   </p>
                 </td>
                 <td class="px-3 py-2">
-                  <span
-                    class="badge"
-                    :class="statusStyles[chapter.status] ?? 'bg-ink-800 text-slate-400'"
-                  >
-                    {{ chapterStatusLabel(chapter.status) }}
-                  </span>
+                  <div class="inline-flex items-center gap-1.5 whitespace-nowrap">
+                    <span
+                      class="badge"
+                      :class="statusStyles[chapter.status] ?? 'bg-ink-800 text-slate-400'"
+                    >
+                      {{ chapterStatusLabel(chapter.status) }}
+                    </span>
+                    <button
+                      v-if="chapter.needs_review"
+                      type="button"
+                      class="inline-flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded-full border border-amber-700/70 bg-amber-950/60 text-[11px] font-bold leading-none text-amber-400 hover:opacity-85"
+                      :title="chapter.review_summary || t('workspace.chapterModal.reviewBannerTitle')"
+                      :aria-label="t('workspace.chapterModal.needsReviewBadge')"
+                      @click="openChapter(chapter)"
+                    >
+                      !
+                    </button>
+                  </div>
                 </td>
                 <td class="px-3 py-2">
                   <span
@@ -2501,6 +2543,33 @@ onBeforeUnmount(stopStream)
               ✕
             </button>
           </div>
+        </div>
+
+        <div
+          v-if="editing.needs_review && editing.review_issues?.length"
+          class="rounded-lg border border-amber-700/70 bg-amber-950/30 p-3 text-xs text-amber-200"
+        >
+          <p class="font-semibold text-amber-300">
+            ! {{ t('workspace.chapterModal.reviewBannerTitle') }}
+          </p>
+          <p class="mt-0.5 text-[11px] text-amber-300/90">
+            {{ t('workspace.chapterModal.reviewBannerHint') }}
+          </p>
+          <ul class="mt-2 max-h-28 space-y-1 overflow-y-auto text-[11px]">
+            <li
+              v-for="(issue, idx) in editing.review_issues"
+              :key="`${issue.code}-${issue.field}-${issue.line}-${idx}`"
+              class="flex flex-wrap items-baseline gap-1.5"
+            >
+              <span class="rounded border border-amber-700/70 bg-amber-950/60 px-1.5 py-0.5 font-medium text-amber-400">
+                {{ t(`workspace.chapterModal.issueCodes.${issue.code}`) }}
+              </span>
+              <span class="font-mono text-amber-300/90">
+                {{ issue.field }}:L{{ issue.line }}
+              </span>
+              <span class="truncate text-amber-200">{{ issue.snippet }}</span>
+            </li>
+          </ul>
         </div>
 
         <div class="grid gap-3 md:grid-cols-2">

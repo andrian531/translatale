@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field, field_validator
 import database
 from core import job_runner
 from core.app_settings import get_scraper_settings
+from core.quality import inspect_chapter_cleanliness
 from core.synopsis import SynopsisError, refine_synopsis, translate_metadata
 from llm.base import TaskNotConfiguredError
 from scrapers.base import ScraperError
@@ -159,6 +160,9 @@ class ChapterOut(BaseModel):
     translated_content: str
     status: str
     quality_score: float | None
+    needs_review: bool = False
+    review_issues: list[dict[str, Any]] = []
+    review_summary: str = ""
     created_at: str
     updated_at: str
 
@@ -196,8 +200,17 @@ def _novel_out(row: sqlite3.Row) -> NovelOut:
     return NovelOut(**data)
 
 
-def _chapter_out(row: sqlite3.Row) -> ChapterOut:
-    return ChapterOut(**{key: row[key] for key in row.keys()})
+def _chapter_out(row: sqlite3.Row, source_lang: str = "zh") -> ChapterOut:
+    data = {key: row[key] for key in row.keys()}
+    data.update(
+        inspect_chapter_cleanliness(
+            data.get("raw_content"),
+            data.get("translated_content"),
+            status=data.get("status"),
+            source_lang=source_lang,
+        )
+    )
+    return ChapterOut(**data)
 
 
 def _get_novel(conn: sqlite3.Connection, novel_id: int) -> sqlite3.Row:
@@ -419,7 +432,7 @@ async def refine_novel_synopsis(novel_id: int) -> NovelOut:
 @router.get("/novels/{novel_id}/chapters", response_model=list[ChapterOut])
 def list_chapters(novel_id: int, status: ChapterStatus | None = None) -> list[ChapterOut]:
     with database.get_conn() as conn:
-        _get_novel(conn, novel_id)
+        novel = _get_novel(conn, novel_id)
         if status:
             rows = conn.execute(
                 "SELECT * FROM chapters WHERE novel_id = ? AND status = ? "
@@ -431,7 +444,7 @@ def list_chapters(novel_id: int, status: ChapterStatus | None = None) -> list[Ch
                 "SELECT * FROM chapters WHERE novel_id = ? ORDER BY chapter_number ASC, id ASC",
                 (novel_id,),
             ).fetchall()
-    return [_chapter_out(row) for row in rows]
+    return [_chapter_out(row, source_lang=novel["source_lang"]) for row in rows]
 
 
 @router.post("/novels/{novel_id}/chapters/manual", response_model=ChapterOut, status_code=201)

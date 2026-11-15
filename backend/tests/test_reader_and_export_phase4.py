@@ -344,3 +344,43 @@ def test_export_pdf_starts_each_chapter_on_new_page_and_uses_translated_title(cl
     # Title page + 2 chapters = 3 pages (each chapter starts on its own page)
     page_count = pdf_resp.content.count(b"/Type /Page") - pdf_resp.content.count(b"/Type /Pages")
     assert page_count >= 3
+
+
+def test_chapter_cleanliness_flags_scrape_noise_and_leftovers(client):
+    novel = _create_novel(client, title="Test Cleanliness")
+    dirty = _add_chapter(
+        client,
+        novel["id"],
+        "第1章",
+        "Isi cerita.\n\n记得收藏网址 https://www.example.com/ 哦！\n目录",
+        number=1,
+    )
+    _mark_translated(
+        dirty["id"],
+        "Isi cerita yang panjang dan wajar.\n\nJangan lupa simpan https://www.example.com/\nDaftar isi",
+        "Bab 1",
+    )
+
+    clean = _add_chapter(
+        client,
+        novel["id"],
+        "第2章",
+        "Panjang teks mentah yang bersih dan lebih dari delapan puluh karakter supaya tidak ditandai pendek.",
+        number=2,
+    )
+    _mark_translated(
+        clean["id"],
+        "Terjemahan bersih tanpa iklan situs atau navigasi halaman, cukup panjang untuk sebuah bab.",
+        "Bab 2",
+    )
+
+    listed = client.get(f"/api/novels/{novel['id']}/chapters").json()
+    by_id = {c["id"]: c for c in listed}
+
+    assert by_id[dirty["id"]]["needs_review"] is True
+    codes = {issue["code"] for issue in by_id[dirty["id"]]["review_issues"]}
+    assert "promo" in codes
+    assert "navigation" in codes
+
+    assert by_id[clean["id"]]["needs_review"] is False
+    assert by_id[clean["id"]]["review_issues"] == []

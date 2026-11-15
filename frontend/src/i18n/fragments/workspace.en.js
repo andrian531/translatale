@@ -13,6 +13,7 @@ export default {
   },
   filters: {
     all: 'All',
+    needsReview: 'Needs Review',
   },
   table: {
     title: 'Title',
@@ -206,6 +207,17 @@ export default {
     rawPlaceholder: 'No content yet — run Fetch Raw for this chapter.',
     translatedLabel: 'Translated ({count} characters)',
     translatedPlaceholder: 'Not translated yet — select this chapter and click Translate Selected.',
+    needsReviewBadge: 'Check',
+    tableReviewNotice: 'Chapters marked with (!) may contain scrape promo, page navigation, or leftover text — check Raw or edit Translated manually before exporting.',
+    reviewBannerTitle: 'Cleanliness check flagged potential scrape noise or leftovers',
+    reviewBannerHint: 'Recommended: inspect or manually edit the flagged lines below before exporting.',
+    issueCodes: {
+      promo: 'Site / Promo',
+      navigation: 'Page Navigation',
+      html_noise: 'HTML / Script',
+      short_text: 'Too Short',
+      cjk_leftover: 'CJK Leftover',
+    },
   },
   contextWarning: {
     title: 'Earlier Chapters Are Not Translated',

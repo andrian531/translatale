@@ -153,3 +153,113 @@ def score_translation(
         "term_violations": violations[:20],
         "characters": total_chars,
     }
+
+
+_URL_RE = re.compile(r"(?:https?://\S+|www\.[a-z0-9-]+(?:\.[a-z]{2,})+)", re.IGNORECASE)
+_ZH_PROMO_RE = re.compile(
+    r"(记住本站|最新章节|无弹窗|笔趣阁|请收藏|加入书签|投推荐票|下载.{0,12}(?:APP|客户端)|本章未完|点击下一页|继续阅读|首发域名|手机版阅读)"
+)
+_TRANS_PROMO_RE = re.compile(
+    r"\b(?:baca\s+bab\s+terbaru|kunjungi\s+situs|bookmark\s+situs|ingat\s+nama\s+domain|"
+    r"tanpa\s+pop-?up|update\s+tercepat|klik\s+untuk\s+melanjutkan|bab\s+ini\s+belum\s+selesai|"
+    r"read\s+latest\s+chapters?|visit\s+our\s+website|please\s+bookmark)\b",
+    re.IGNORECASE,
+)
+_NAV_LINE_RE = re.compile(
+    r"^\s*(?:上一章|下一章|返回目录|目录|上一页|下一页|第\s*\d+\s*/\s*\d+\s*页|"
+    r"halaman\s+(?:sebelumnya|selanjutnya|\d+\s*/\s*\d+)|"
+    r"bab\s+(?:sebelumnya|selanjutnya|berikutnya)|daftar\s+isi|"
+    r"previous\s+(?:chapter|page)|next\s+(?:chapter|page)|"
+    r"page\s+\d+\s*/\s*\d+|table\s+of\s+contents)\s*$",
+    re.IGNORECASE,
+)
+_PAGE_FRACTION_RE = re.compile(
+    r"(?:第\s*\d+\s*/\s*\d+\s*页|\b(?:Halaman|Page)\s+\d+\s*/\s*\d+\b)",
+    re.IGNORECASE,
+)
+_HTML_NOISE_RE = re.compile(
+    r"(?:<script|</script>|<iframe|<div\b|&nbsp;|Just a moment\.\.\.|Access denied|404 Not Found|章节不存在)",
+    re.IGNORECASE,
+)
+
+
+def _snippet(line: str, limit: int = 90) -> str:
+    cleaned = re.sub(r"\s+", " ", line).strip()
+    if len(cleaned) <= limit:
+        return cleaned
+    return cleaned[: limit - 1] + "…"
+
+
+def inspect_chapter_cleanliness(
+    raw_content: str | None,
+    translated_content: str | None,
+    status: str | None = None,
+    source_lang: str = "zh",
+    max_issues: int = 10,
+) -> dict[str, Any]:
+    """Detect scrape noise, promo/navigation leftovers, or CJK remnants in a chapter."""
+    issues: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, int]] = set()
+
+    def _add(code: str, field: str, line_no: int, text: str) -> None:
+        key = (code, field, line_no)
+        if key in seen or len(issues) >= max_issues:
+            return
+        seen.add(key)
+        issues.append(
+            {
+                "code": code,
+                "field": field,
+                "line": line_no,
+                "snippet": _snippet(text),
+            }
+        )
+
+    def _scan_text(field: str, content: str) -> None:
+        if not content:
+            return
+        for idx, line in enumerate(content.splitlines(), start=1):
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if _HTML_NOISE_RE.search(stripped):
+                _add("html_noise", field, idx, stripped)
+            if _URL_RE.search(stripped) or _ZH_PROMO_RE.search(stripped) or _TRANS_PROMO_RE.search(stripped):
+                _add("promo", field, idx, stripped)
+            if len(stripped) <= 80 and (
+                _NAV_LINE_RE.match(stripped) or _PAGE_FRACTION_RE.search(stripped)
+            ):
+                _add("navigation", field, idx, stripped)
+
+    raw = raw_content or ""
+    translated = translated_content or ""
+
+    _scan_text("raw", raw)
+    _scan_text("translated", translated)
+
+    if status == "raw" and raw.strip():
+        if len(re.sub(r"\s+", "", raw)) < 80:
+            _add("short_text", "raw", 1, raw)
+
+    if translated.strip():
+        if status == "translated" and len(re.sub(r"\s+", "", translated)) < 50:
+            _add("short_text", "translated", 1, translated)
+        if source_lang in CJK_SOURCE_LANGS:
+            cjk_count = len(CJK_RE.findall(translated))
+            total_chars = len(re.sub(r"\s+", "", translated))
+            if cjk_count >= 3 or (total_chars and cjk_count / total_chars > 0.01):
+                for idx, line in enumerate(translated.splitlines(), start=1):
+                    if CJK_RE.search(line):
+                        _add("cjk_leftover", "translated", idx, line)
+                        break
+
+    counts: dict[str, int] = {}
+    for item in issues:
+        counts[item["code"]] = counts.get(item["code"], 0) + 1
+    summary = ", ".join(f"{code} ({cnt})" for code, cnt in counts.items())
+
+    return {
+        "needs_review": bool(issues),
+        "review_issues": issues,
+        "review_summary": summary,
+    }

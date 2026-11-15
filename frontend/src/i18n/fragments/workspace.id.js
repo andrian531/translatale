@@ -13,6 +13,7 @@ export default {
   },
   filters: {
     all: 'Semua',
+    needsReview: 'Perlu Dicek',
   },
   table: {
     title: 'Judul',
@@ -206,6 +207,17 @@ export default {
     rawPlaceholder: 'Belum ada isi — jalankan Fetch Raw untuk bab ini.',
     translatedLabel: 'Translated ({count} karakter)',
     translatedPlaceholder: 'Belum diterjemahkan — pilih bab ini lalu klik Translate Terpilih.',
+    needsReviewBadge: 'Perlu Dicek',
+    tableReviewNotice: 'Bab bertanda (!) terindikasi berisi promosi situs, navigasi halaman, atau sisa teks — cek Raw atau edit manual hasil terjemahan sebelum ekspor.',
+    reviewBannerTitle: 'Terdeteksi indikasi sisa scraping atau teks yang perlu dicek',
+    reviewBannerHint: 'Disarankan edit manual atau cek baris yang ditandai di bawah sebelum ekspor.',
+    issueCodes: {
+      promo: 'Promosi / Situs',
+      navigation: 'Navigasi Halaman',
+      html_noise: 'Sisa HTML / Script',
+      short_text: 'Teks Terlalu Pendek',
+      cjk_leftover: 'Sisa CJK',
+    },
   },
   contextWarning: {
     title: 'Bab Sebelumnya Belum Diterjemahkan',
