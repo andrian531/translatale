@@ -153,7 +153,13 @@ const JOB_LABELS = {
   translate: 'Translate',
   story_analysis: 'Analisa Cerita',
   fetch: 'Fetch Bab',
+  apply_reference: 'Terapkan Referensi',
 }
+
+const translatedChaptersCount = computed(
+  () => chapters.value.filter((c) => (c.translated_content || '').trim() || c.status === 'translated').length,
+)
+const applyingReference = ref(false)
 
 function jobLabel(type) {
   return JOB_LABELS[type] ?? type ?? 'Job'
@@ -679,12 +685,24 @@ function addCharacter() {
 }
 
 function addTerm() {
-  reference.value.terms.push({ source: '', target: '', note: '' })
+  reference.value.terms.push({
+    source: '',
+    romanized: '',
+    target: '',
+    note: '',
+    keep_romanized: false,
+  })
   markDirty()
 }
 
 function addLocation() {
-  reference.value.locations.push({ source: '', target: '', note: '' })
+  reference.value.locations.push({
+    source: '',
+    romanized: '',
+    target: '',
+    note: '',
+    keep_romanized: false,
+  })
   markDirty()
 }
 
@@ -728,6 +746,34 @@ async function saveReference() {
     flash('error', `Gagal menyimpan reference: ${err.message}`)
   } finally {
     savingReference.value = false
+  }
+}
+
+async function applyReferenceToTranslated() {
+  if (!translatedChaptersCount.value) {
+    flash('error', 'Belum ada bab yang sudah diterjemahkan.')
+    return
+  }
+  if (
+    !window.confirm(
+      `Terapkan nama karakter, lokasi, dan glossary terbaru ke ${translatedChaptersCount.value} bab yang sudah diterjemahkan?`,
+    )
+  ) {
+    return
+  }
+  applyingReference.value = true
+  try {
+    if (referenceDirty.value) {
+      await saveReference()
+    }
+    const started = await translationApi.applyReference(novelId.value)
+    job.value = started
+    jobMessage.value = started.message
+    watchJob(started.id)
+  } catch (err) {
+    flash('error', `Gagal menerapkan referensi: ${err.message}`)
+  } finally {
+    applyingReference.value = false
   }
 }
 
@@ -1260,6 +1306,18 @@ onBeforeUnmount(stopStream)
           <button class="btn-primary" :disabled="savingReference" @click="saveReference">
             {{ savingReference ? 'Menyimpan…' : 'Simpan Perubahan' }}
           </button>
+          <button
+            class="btn-ghost"
+            :disabled="jobActive || applyingReference || !translatedChaptersCount"
+            title="Perbarui istilah & nama karakter pada bab yang sudah diterjemahkan agar sesuai pengaturan terbaru"
+            @click="applyReferenceToTranslated"
+          >
+            {{
+              applyingReference
+                ? 'Memulai…'
+                : `Terapkan ke Bab Terjemahan (${translatedChaptersCount})`
+            }}
+          </button>
           <span v-if="referenceDirty" class="text-xs text-amber-400">ada perubahan belum disimpan</span>
           <span v-else class="text-xs text-slate-500">tersimpan</span>
         </div>
@@ -1283,14 +1341,18 @@ onBeforeUnmount(stopStream)
 
           <!-- characters -->
           <section class="card">
-            <div class="mb-3 flex items-center justify-between">
+            <div class="mb-3 flex items-center justify-between gap-2">
               <h2 class="text-sm font-semibold text-white">
                 Characters
-                <span class="ml-1 text-xs font-normal text-slate-500">
+                <span class="ml-1 text-xs font-normal tabular-nums text-slate-500">
                   ({{ reference.characters.length }})
                 </span>
               </h2>
-              <button class="btn-ghost !px-2.5 !py-1 text-xs" @click="addCharacter">
+              <button
+                type="button"
+                class="btn-ghost !px-2.5 !py-1 text-xs"
+                @click="addCharacter"
+              >
                 + Karakter
               </button>
             </div>
@@ -1299,116 +1361,296 @@ onBeforeUnmount(stopStream)
               Belum ada karakter. Jalankan Run AI Analysis atau tambah manual.
             </p>
 
-            <div v-for="(character, index) in reference.characters" :key="index" class="mb-3 rounded-lg border border-ink-800 p-3">
-              <div class="grid gap-2 sm:grid-cols-4">
-                <div>
-                  <label class="label">Nama (sumber)</label>
-                  <input v-model="character.name" class="input text-xs" @input="markDirty" />
-                </div>
-                <div>
-                  <label class="label">Romanized</label>
+            <div v-else class="divide-y divide-ink-800/80 border-t border-ink-800/80">
+              <div
+                v-for="(character, index) in reference.characters"
+                :key="index"
+                class="py-2.5 first:pt-2 last:pb-0"
+              >
+                <div class="grid items-center gap-1.5 grid-cols-[minmax(0,1fr)_minmax(0,1fr)_28px] sm:grid-cols-[minmax(0,1.1fr)_minmax(0,1.1fr)_minmax(0,0.55fr)_minmax(0,0.45fr)_28px]">
+                  <input
+                    v-model="character.name"
+                    class="input col-span-2 !px-2 !py-1 text-xs sm:col-span-1"
+                    placeholder="Nama asli"
+                    title="Nama karakter (aksara sumber)"
+                    aria-label="Nama karakter asli"
+                    @input="markDirty"
+                  />
                   <input
                     v-model="character.romanized_name"
-                    class="input text-xs"
+                    class="input col-span-3 !px-2 !py-1 text-xs sm:col-span-1"
+                    placeholder="Romanized"
+                    title="Nama romanisasi (Latin)"
+                    aria-label="Nama romanisasi"
                     @input="markDirty"
                   />
+                  <input
+                    v-model="character.gender"
+                    class="input col-span-1 !px-2 !py-1 text-xs sm:col-span-1"
+                    placeholder="Gender"
+                    title="Gender"
+                    aria-label="Gender"
+                    @input="markDirty"
+                  />
+                  <input
+                    v-model="character.age"
+                    class="input col-span-2 !px-2 !py-1 text-xs sm:col-span-1"
+                    placeholder="Usia"
+                    title="Usia"
+                    aria-label="Usia"
+                    @input="markDirty"
+                  />
+                  <button
+                    type="button"
+                    class="btn-danger col-start-3 row-start-1 h-[26px] w-7 !p-0 text-[11px] sm:col-start-auto sm:row-start-auto"
+                    title="Hapus karakter"
+                    aria-label="Hapus karakter"
+                    @click="removeAt(reference.characters, index)"
+                  >
+                    ✕
+                  </button>
                 </div>
-                <div>
-                  <label class="label">Gender</label>
-                  <input v-model="character.gender" class="input text-xs" @input="markDirty" />
-                </div>
-                <div>
-                  <label class="label">Usia</label>
-                  <input v-model="character.age" class="input text-xs" @input="markDirty" />
-                </div>
-              </div>
-              <div class="mt-2 grid gap-2 sm:grid-cols-3">
-                <div>
-                  <label class="label">Alias (pisahkan koma)</label>
+                <div class="mt-1.5 grid gap-1.5 sm:grid-cols-[minmax(0,0.9fr)_minmax(0,1.2fr)_minmax(0,1.2fr)]">
                   <input
                     :value="aliasesToText(character)"
-                    class="input text-xs"
+                    class="input !px-2 !py-1 text-xs"
+                    placeholder="Alias / julukan (pisahkan koma)"
+                    title="Alias atau julukan, pisahkan dengan koma"
+                    aria-label="Alias atau julukan"
                     @input="setAliases(character, $event.target.value)"
                   />
-                </div>
-                <div>
-                  <label class="label">Relasi</label>
                   <input
                     v-model="character.relationships"
-                    class="input text-xs"
+                    class="input !px-2 !py-1 text-xs"
+                    placeholder="Relasi antar karakter"
+                    title="Hubungan dengan karakter lain"
+                    aria-label="Relasi antar karakter"
+                    @input="markDirty"
+                  />
+                  <input
+                    v-model="character.notes"
+                    class="input !px-2 !py-1 text-xs"
+                    placeholder="Catatan karakter"
+                    title="Catatan tambahan"
+                    aria-label="Catatan karakter"
                     @input="markDirty"
                   />
                 </div>
-                <div>
-                  <label class="label">Catatan</label>
-                  <input v-model="character.notes" class="input text-xs" @input="markDirty" />
-                </div>
-              </div>
-              <div class="mt-2 text-right">
-                <button
-                  class="btn-danger !px-2 !py-0.5 text-[11px]"
-                  @click="removeAt(reference.characters, index)"
-                >
-                  Hapus karakter
-                </button>
               </div>
             </div>
           </section>
 
           <!-- terms -->
           <section class="card">
-            <div class="mb-3 flex items-center justify-between">
+            <div class="mb-3 flex items-center justify-between gap-2">
               <h2 class="text-sm font-semibold text-white">
                 Terms / Glossary
-                <span class="ml-1 text-xs font-normal text-slate-500">
+                <span class="ml-1 text-xs font-normal tabular-nums text-slate-500">
                   ({{ reference.terms.length }})
                 </span>
               </h2>
-              <button class="btn-ghost !px-2.5 !py-1 text-xs" @click="addTerm">+ Istilah</button>
+              <button
+                type="button"
+                class="btn-ghost !px-2.5 !py-1 text-xs"
+                @click="addTerm"
+              >
+                + Istilah
+              </button>
             </div>
             <p v-if="!reference.terms.length" class="text-xs text-slate-500">
               Istilah wajib (tingkatan, teknik, organisasi). Dipakai juga untuk skor kepatuhan.
             </p>
-            <div
-              v-for="(term, index) in reference.terms"
-              :key="index"
-              class="mb-2 grid gap-2 sm:grid-cols-[1fr_1fr_1fr_auto]"
-            >
-              <input v-model="term.source" class="input text-xs" placeholder="sumber" @input="markDirty" />
-              <input v-model="term.target" class="input text-xs" placeholder="terjemahan" @input="markDirty" />
-              <input v-model="term.note" class="input text-xs" placeholder="catatan" @input="markDirty" />
-              <button class="btn-danger !px-2 !py-1 text-[11px]" @click="removeAt(reference.terms, index)">
-                ✕
-              </button>
+            <div v-else>
+              <div class="hidden gap-1.5 border-b border-ink-800/80 pb-1.5 text-[11px] font-medium text-slate-400 sm:grid sm:grid-cols-[minmax(0,0.85fr)_minmax(0,0.85fr)_minmax(0,1fr)_minmax(0,1fr)_76px_28px]">
+                <span>Asli</span>
+                <span>Cara baca</span>
+                <span>Terjemahan</span>
+                <span>Catatan</span>
+                <span
+                  class="whitespace-nowrap text-center"
+                  title="Tetap pakai kata Latin dengan terjemahan dalam kurung"
+                >
+                  Latin (TL)
+                </span>
+                <span />
+              </div>
+              <div class="divide-y divide-ink-800/70">
+                <div
+                  v-for="(term, index) in reference.terms"
+                  :key="index"
+                  class="grid grid-cols-2 items-center gap-1.5 py-1.5 sm:grid-cols-[minmax(0,0.85fr)_minmax(0,0.85fr)_minmax(0,1fr)_minmax(0,1fr)_76px_28px]"
+                >
+                  <input
+                    v-model="term.source"
+                    class="input !px-2 !py-1 text-xs"
+                    placeholder="Asli"
+                    title="Istilah asli (aksara sumber)"
+                    aria-label="Istilah asli"
+                    @input="markDirty"
+                  />
+                  <input
+                    v-model="term.romanized"
+                    class="input !px-2 !py-1 text-xs"
+                    placeholder="Cara baca"
+                    title="Cara baca / romanisasi Latin"
+                    aria-label="Cara baca"
+                    @input="markDirty"
+                  />
+                  <input
+                    v-model="term.target"
+                    class="input !px-2 !py-1 text-xs"
+                    placeholder="Terjemahan"
+                    title="Terjemahan istilah"
+                    aria-label="Terjemahan"
+                    @input="markDirty"
+                  />
+                  <input
+                    v-model="term.note"
+                    class="input !px-2 !py-1 text-xs"
+                    placeholder="Catatan"
+                    title="Catatan konteks istilah"
+                    aria-label="Catatan"
+                    @input="markDirty"
+                  />
+                  <label
+                    class="flex h-[26px] w-fit cursor-pointer select-none items-center justify-center gap-1 rounded border px-2 py-1 text-[11px] transition-colors focus-within:border-indigo-500 focus-within:ring-1 focus-within:ring-indigo-500 sm:w-full sm:px-1.5"
+                    :class="
+                      term.keep_romanized
+                        ? 'border-indigo-500/60 bg-indigo-950/50 text-indigo-200'
+                        : 'border-ink-700 bg-ink-850 text-slate-400 hover:text-slate-200'
+                    "
+                    :title="
+                      term.keep_romanized && (term.romanized || '').trim()
+                        ? `Format: ${term.romanized.trim()}${(term.target || '').trim() ? ` (${term.target.trim()})` : ''}`
+                        : 'Pakai format Latin (Terjemahan)'
+                    "
+                  >
+                    <input
+                      v-model="term.keep_romanized"
+                      type="checkbox"
+                      class="h-3 w-3 accent-indigo-500 focus:outline-none"
+                      aria-label="Pertahankan format Latin dengan terjemahan dalam kurung"
+                      @change="markDirty"
+                    />
+                    <span>Latin</span>
+                  </label>
+                  <button
+                    type="button"
+                    class="btn-danger h-[26px] w-7 justify-self-end !p-0 text-[11px] sm:w-full sm:justify-self-auto"
+                    title="Hapus istilah"
+                    aria-label="Hapus istilah"
+                    @click="removeAt(reference.terms, index)"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
             </div>
           </section>
 
           <!-- locations -->
           <section class="card">
-            <div class="mb-3 flex items-center justify-between">
+            <div class="mb-3 flex items-center justify-between gap-2">
               <h2 class="text-sm font-semibold text-white">
                 Locations
-                <span class="ml-1 text-xs font-normal text-slate-500">
+                <span class="ml-1 text-xs font-normal tabular-nums text-slate-500">
                   ({{ reference.locations.length }})
                 </span>
               </h2>
-              <button class="btn-ghost !px-2.5 !py-1 text-xs" @click="addLocation">+ Lokasi</button>
+              <button
+                type="button"
+                class="btn-ghost !px-2.5 !py-1 text-xs"
+                @click="addLocation"
+              >
+                + Lokasi
+              </button>
             </div>
             <p v-if="!reference.locations.length" class="text-xs text-slate-500">Belum ada lokasi.</p>
-            <div
-              v-for="(location, index) in reference.locations"
-              :key="index"
-              class="mb-2 grid gap-2 sm:grid-cols-[1fr_1fr_1fr_auto]"
-            >
-              <input v-model="location.source" class="input text-xs" placeholder="sumber" @input="markDirty" />
-              <input v-model="location.target" class="input text-xs" placeholder="terjemahan" @input="markDirty" />
-              <input v-model="location.note" class="input text-xs" placeholder="catatan" @input="markDirty" />
-              <button
-                class="btn-danger !px-2 !py-1 text-[11px]"
-                @click="removeAt(reference.locations, index)"
-              >
-                ✕
-              </button>
+            <div v-else>
+              <div class="hidden gap-1.5 border-b border-ink-800/80 pb-1.5 text-[11px] font-medium text-slate-400 sm:grid sm:grid-cols-[minmax(0,0.85fr)_minmax(0,0.85fr)_minmax(0,1fr)_minmax(0,1fr)_76px_28px]">
+                <span>Asli</span>
+                <span>Cara baca</span>
+                <span>Terjemahan</span>
+                <span>Catatan</span>
+                <span
+                  class="whitespace-nowrap text-center"
+                  title="Tetap pakai kata Latin dengan terjemahan dalam kurung"
+                >
+                  Latin (TL)
+                </span>
+                <span />
+              </div>
+              <div class="divide-y divide-ink-800/70">
+                <div
+                  v-for="(location, index) in reference.locations"
+                  :key="index"
+                  class="grid grid-cols-2 items-center gap-1.5 py-1.5 sm:grid-cols-[minmax(0,0.85fr)_minmax(0,0.85fr)_minmax(0,1fr)_minmax(0,1fr)_76px_28px]"
+                >
+                  <input
+                    v-model="location.source"
+                    class="input !px-2 !py-1 text-xs"
+                    placeholder="Asli"
+                    title="Nama lokasi asli (aksara sumber)"
+                    aria-label="Nama lokasi asli"
+                    @input="markDirty"
+                  />
+                  <input
+                    v-model="location.romanized"
+                    class="input !px-2 !py-1 text-xs"
+                    placeholder="Cara baca"
+                    title="Cara baca / romanisasi Latin"
+                    aria-label="Cara baca"
+                    @input="markDirty"
+                  />
+                  <input
+                    v-model="location.target"
+                    class="input !px-2 !py-1 text-xs"
+                    placeholder="Terjemahan"
+                    title="Terjemahan lokasi"
+                    aria-label="Terjemahan"
+                    @input="markDirty"
+                  />
+                  <input
+                    v-model="location.note"
+                    class="input !px-2 !py-1 text-xs"
+                    placeholder="Catatan"
+                    title="Catatan konteks lokasi"
+                    aria-label="Catatan"
+                    @input="markDirty"
+                  />
+                  <label
+                    class="flex h-[26px] w-fit cursor-pointer select-none items-center justify-center gap-1 rounded border px-2 py-1 text-[11px] transition-colors focus-within:border-indigo-500 focus-within:ring-1 focus-within:ring-indigo-500 sm:w-full sm:px-1.5"
+                    :class="
+                      location.keep_romanized
+                        ? 'border-indigo-500/60 bg-indigo-950/50 text-indigo-200'
+                        : 'border-ink-700 bg-ink-850 text-slate-400 hover:text-slate-200'
+                    "
+                    :title="
+                      location.keep_romanized && (location.romanized || '').trim()
+                        ? `Format: ${location.romanized.trim()}${(location.target || '').trim() ? ` (${location.target.trim()})` : ''}`
+                        : 'Pakai format Latin (Terjemahan)'
+                    "
+                  >
+                    <input
+                      v-model="location.keep_romanized"
+                      type="checkbox"
+                      class="h-3 w-3 accent-indigo-500 focus:outline-none"
+                      aria-label="Pertahankan format Latin dengan terjemahan dalam kurung"
+                      @change="markDirty"
+                    />
+                    <span>Latin</span>
+                  </label>
+                  <button
+                    type="button"
+                    class="btn-danger h-[26px] w-7 justify-self-end !p-0 text-[11px] sm:w-full sm:justify-self-auto"
+                    title="Hapus lokasi"
+                    aria-label="Hapus lokasi"
+                    @click="removeAt(reference.locations, index)"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
             </div>
           </section>
 

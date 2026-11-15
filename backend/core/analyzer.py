@@ -35,16 +35,20 @@ Return JSON with exactly these keys:
       "age": "", "gender": "", "aliases": ["..."],
       "relationships": "short description", "notes": "short description"}}
   ],
-  "locations": [{{"source": "source-script place", "target": "translated place", "note": ""}}],
-  "terms": [{{"source": "source-script term", "target": "translated term", "note": "why"}}],
-  "translation_guide": "3-6 sentences: tone, register, naming rules, honorifics, punctuation"
+  "locations": [{{"source": "source-script place", "romanized": "pinyin/romaji/latin reading", "target": "{target_lang} place name", "note": ""}}],
+  "terms": [{{"source": "source-script term", "romanized": "pinyin/romaji/latin reading", "target": "{target_lang} term", "note": "why"}}],
+  "translation_guide": "3-6 sentences in English: tone, register, naming rules, honorifics, punctuation"
 }}
 
 Rules:
 - Only include characters, places and terms that actually appear in the text.
 - `terms` are recurring nouns that must be translated consistently (cultivation
   realms, ranks, techniques, organizations, items).
-- `romanized_name` must be a real reading, not a guess at the meaning.
+- `locations.target` and `terms.target` MUST be written in {target_lang}.
+- Keep `relationships`, `notes`, `note`, and `translation_guide` in English so
+  kinship/hierarchy nuances stay precise for the translator.
+- `romanized_name` and `romanized` (on locations & terms) must be a real reading
+  in Latin letters (pinyin/romaji/Korean romanization), not a guess at the meaning.
 - Keep every string short. Do not invent facts.
 
 [EXISTING REFERENCE — extend it, do not drop entries]
@@ -64,13 +68,15 @@ Return JSON with exactly these keys:
       "age": "", "gender": "", "aliases": ["..."],
       "relationships": "short description", "notes": "short description"}}
   ],
-  "locations": [{{"source": "source-script place", "target": "translated place", "note": ""}}],
-  "terms": [{{"source": "source-script term", "target": "translated term", "note": "why"}}]
+  "locations": [{{"source": "source-script place", "romanized": "pinyin/romaji/latin reading", "target": "{target_lang} place name", "note": ""}}],
+  "terms": [{{"source": "source-script term", "romanized": "pinyin/romaji/latin reading", "target": "{target_lang} term", "note": "why"}}]
 }}
 
 Rules:
 - Return ONLY entries that are not in the existing reference yet, plus aliases or
   relationships of a character that is already listed but lacks them.
+- `locations.target` and `terms.target` MUST be written in {target_lang}; keep
+  `relationships`, `notes`, and `note` in English.
 - Never repeat an existing `name` or `source`. If an entry only needs a new alias or
   relationship, return that same `name`/`source` with just the missing field filled.
 - Do not rename, re-translate or contradict anything already in the reference.
@@ -146,6 +152,22 @@ def _as_entries(value: Any) -> list[dict[str, Any]]:
     return [item for item in value if isinstance(item, dict)]
 
 
+_TARGET_LANG_NAMES = {
+    "id": "Indonesian",
+    "en": "English",
+    "ms": "Malay",
+}
+
+
+def _novel_target_lang(novel_id: int, db_path: str | None) -> str:
+    with database.get_conn(db_path) as conn:
+        row = conn.execute(
+            "SELECT target_lang FROM novels WHERE id = ?", (novel_id,)
+        ).fetchone()
+    code = (row["target_lang"] if row else None) or "id"
+    return _TARGET_LANG_NAMES.get(code.lower(), code)
+
+
 def _load_chapters(
     novel_id: int,
     chapter_ids: list[int] | None,
@@ -211,6 +233,7 @@ async def analyze_novel(
         ) from exc
 
     prompt = ANALYSIS_PROMPT.format(
+        target_lang=_novel_target_lang(novel_id, db_path),
         existing=json.dumps(existing_payload, ensure_ascii=False)[:4000],
         chapters=_render_chapters(chapters, max_chars_per_chapter),
     )
@@ -312,6 +335,7 @@ async def update_reference_from_chapter(
     }
 
     prompt = NEW_ENTITIES_PROMPT.format(
+        target_lang=_novel_target_lang(chapter["novel_id"], db_path),
         existing=json.dumps(existing_payload, ensure_ascii=False)[:4000],
         number=chapter.get("chapter_number"),
         title=chapter.get("title") or "",

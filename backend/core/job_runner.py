@@ -20,14 +20,14 @@ from core.analyzer import (
     update_reference_from_chapter,
 )
 from core.app_settings import get_scraper_settings
-from core.translator import TranslationError, translate_chapter
+from core.translator import TranslationError, apply_reference_to_chapter, translate_chapter
 from scrapers.base import ScraperError
 from scrapers.registry import find_scraper, get_scraper
 
 logger = logging.getLogger(__name__)
 
 TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
-JOB_TYPES = frozenset({"story_analysis", "translate", "fetch"})
+JOB_TYPES = frozenset({"story_analysis", "translate", "fetch", "apply_reference"})
 
 HEARTBEAT_SECONDS = 15.0
 
@@ -258,6 +258,8 @@ async def _run(
             await _run_analysis(state, novel_id, chapter_ids, db_path)
         elif job_type == "fetch":
             await _run_fetch(state, novel_id, chapter_ids, db_path)
+        elif job_type == "apply_reference":
+            await _run_apply_reference(state, novel_id, chapter_ids, db_path)
         else:
             await _run_translate(
                 state, novel_id, chapter_ids, db_path, auto_update_reference
@@ -677,6 +679,107 @@ async def _run_translate(
             {
                 "type": "warning",
                 "message": f"{len(failures)} bab gagal: {failures[0]}",
+            },
+        )
+
+
+async def _run_apply_reference(
+    state: JobState,
+    novel_id: int,
+    chapter_ids: list[int] | None,
+    db_path: str | None,
+) -> None:
+    """Apply updated reference/glossary settings to already-translated chapters."""
+    job_id = state.job_id
+    if not chapter_ids:
+        raise JobError("Tidak ada bab terjemahan untuk diperbarui")
+
+    total = len(chapter_ids)
+    _update_job(job_id, total_items=total, message=f"0/{total} bab")
+    _publish(
+        job_id,
+        {"type": "progress", "total_items": total, "completed_items": 0, "message": f"0/{total} bab"},
+    )
+
+    completed = 0
+    for chapter_id in chapter_ids:
+        if state.cancelled:
+            raise asyncio.CancelledError
+
+        with database.get_conn(db_path) as conn:
+            row = conn.execute(
+                "SELECT id, chapter_number, title FROM chapters WHERE id = ?", (chapter_id,)
+            ).fetchone()
+        if row is None:
+            continue
+        chapter = dict(row)
+        label = _fmt_number(chapter["chapter_number"])
+
+        _update_job(
+            job_id,
+            current_chapter_id=chapter_id,
+            message=f"Menyesuaikan bab {label}: {chapter['title'] or ''}".strip(),
+        )
+        _publish(
+            job_id,
+            {
+                "type": "chapter",
+                "chapter_id": chapter_id,
+                "chapter_number": chapter["chapter_number"],
+                "chapter_title": chapter["title"],
+                "message": f"Menyesuaikan bab {label}: {chapter['title'] or ''}".strip(),
+            },
+        )
+
+        def on_progress(payload: dict[str, Any], _chapter: dict[str, Any] = chapter) -> None:
+            _publish(
+                job_id,
+                {
+                    **payload,
+                    "chapter_number": _chapter["chapter_number"],
+                    "chapter_title": _chapter["title"],
+                    "message": (
+                        f"Bab {_fmt_number(_chapter['chapter_number'])} — chunk "
+                        f"{payload.get('chunk_index')}/{payload.get('chunk_total')}"
+                    ),
+                },
+            )
+
+        try:
+            result = await apply_reference_to_chapter(
+                chapter_id, db_path, on_progress=on_progress
+            )
+        except (TranslationError, Exception) as exc:  # noqa: BLE001
+            _publish(
+                job_id,
+                {
+                    "type": "chapter_error",
+                    "chapter_id": chapter_id,
+                    "chapter_number": chapter["chapter_number"],
+                    "message": f"Bab {label} gagal disesuaikan: {exc}",
+                },
+            )
+            raise JobError(f"Penyesuaian berhenti di Bab {label}: {exc}") from exc
+
+        completed += 1
+        _update_job(job_id, completed_items=completed)
+        _publish(
+            job_id,
+            {
+                "type": "chapter_done",
+                "chapter_id": chapter_id,
+                "chapter_number": chapter["chapter_number"],
+                "chapter_title": chapter["title"],
+                "title_translated": result["title_translated"],
+                "quality_score": result["quality"]["score"],
+                "grade": result["quality"]["grade"],
+                "chunks": result["chunks"],
+                "completed_items": completed,
+                "total_items": total,
+                "message": (
+                    f"Bab {label} diperbarui — skor {result['quality']['score']} "
+                    f"({result['quality']['grade']})"
+                ),
             },
         )
 

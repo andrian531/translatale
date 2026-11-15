@@ -32,8 +32,10 @@ class CharacterEntry(BaseModel):
 
 class TermEntry(BaseModel):
     source: str
+    romanized: str = ""
     target: str = ""
     note: str = ""
+    keep_romanized: bool = False
 
 
 class ReferencePayload(BaseModel):
@@ -123,6 +125,36 @@ async def start_analysis(novel_id: int, payload: AnalyzePayload | None = None) -
 
     job = await job_runner.start_job("story_analysis", novel_id, chapter_ids)
     return job
+
+
+@router.post("/novels/{novel_id}/reference/apply", status_code=202)
+async def apply_reference(
+    novel_id: int, payload: AnalyzePayload | None = None
+) -> dict[str, Any]:
+    _require_novel(novel_id)
+    _require_task("translate")
+    requested_ids = payload.chapter_ids if payload and payload.chapter_ids else None
+    with database.get_conn() as conn:
+        if requested_ids:
+            placeholders = ",".join("?" for _ in requested_ids)
+            rows = conn.execute(
+                f"SELECT id FROM chapters WHERE novel_id = ? AND id IN ({placeholders}) "
+                "AND translated_content <> '' ORDER BY chapter_number ASC",
+                (novel_id, *requested_ids),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT id FROM chapters WHERE novel_id = ? AND translated_content <> '' "
+                "ORDER BY chapter_number ASC",
+                (novel_id,),
+            ).fetchall()
+    chapter_ids = [row["id"] for row in rows]
+    if not chapter_ids:
+        raise HTTPException(
+            status_code=422,
+            detail="Belum ada bab yang sudah diterjemahkan untuk diperbarui.",
+        )
+    return await job_runner.start_job("apply_reference", novel_id, chapter_ids)
 
 
 @router.post("/novels/{novel_id}/translate", status_code=202)

@@ -49,6 +49,20 @@ CHUNK_PROMPT = """{reference}
 {text}
 """
 
+APPLY_REFERENCE_SYSTEM_PROMPT = (
+    "You are a professional literary editor working on web novel translations in {target}. "
+    "Update ONLY character names, aliases, locations, and glossary/terms in the existing "
+    "translation so they strictly match the [REFERENCE SHEET] (including exact 'Latin (Terjemahan)' "
+    "forms when specified). Preserve the existing prose, sentence flow, and paragraph breaks; "
+    "do not summarize, omit, or add commentary. Output only the updated {target} text."
+)
+
+APPLY_REFERENCE_PROMPT = """{reference}
+
+[EXISTING TRANSLATION TO ALIGN WITH REFERENCE]
+{text}
+"""
+
 ProgressCallback = Callable[[dict[str, Any]], Awaitable[None] | None]
 
 
@@ -122,6 +136,50 @@ async def _emit(callback: ProgressCallback | None, payload: dict[str, Any]) -> N
 def _tail(text: str, limit: int = ROLLING_CONTEXT_CHARS) -> str:
     cleaned = re.sub(r"\s+", " ", text or "").strip()
     return cleaned[-limit:] if len(cleaned) > limit else cleaned
+
+
+async def _generate_chunk_with_retries(
+    resolved: Any,
+    prompt: str,
+    system_prompt: str,
+    index: int,
+    total_chunks: int,
+) -> str:
+    """Call LLM for a chunk with retries on LLMError or empty output."""
+    text = ""
+    last_error: LLMError | None = None
+    for attempt in range(CHUNK_MAX_RETRIES + 1):
+        try:
+            response = await resolved.provider.generate(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                model=resolved.model,
+                temperature=resolved.temperature,
+                max_tokens=resolved.max_tokens,
+            )
+        except LLMError as exc:
+            last_error = exc
+            if attempt < CHUNK_MAX_RETRIES:
+                await asyncio.sleep(CHUNK_RETRY_DELAY)
+                continue
+            raise TranslationError(
+                f"Chunk {index}/{total_chunks} gagal setelah {CHUNK_MAX_RETRIES}x retry: {exc}"
+            ) from exc
+
+        text = (response.text or "").strip()
+        if text:
+            return text
+        if attempt < CHUNK_MAX_RETRIES:
+            await asyncio.sleep(CHUNK_RETRY_DELAY)
+
+    if last_error is not None:
+        raise TranslationError(
+            f"Chunk {index}/{total_chunks} gagal setelah {CHUNK_MAX_RETRIES}x retry: {last_error}"
+        )
+    raise TranslationError(
+        f"Chunk {index}/{total_chunks} kosong dari model ({resolved.model}) "
+        f"setelah {CHUNK_MAX_RETRIES}x retry. Coba naikkan Max Tokens di Settings."
+    )
 
 
 async def translate_chapter(
@@ -205,41 +263,9 @@ async def translate_chapter(
             rolling=rolling or "(start of chapter)",
             text=chunk,
         )
-        text = ""
-        last_error: LLMError | None = None
-        for attempt in range(CHUNK_MAX_RETRIES + 1):
-            try:
-                response = await resolved.provider.generate(
-                    prompt=prompt,
-                    system_prompt=system_prompt,
-                    model=resolved.model,
-                    temperature=resolved.temperature,
-                    max_tokens=resolved.max_tokens,
-                )
-            except LLMError as exc:
-                last_error = exc
-                if attempt < CHUNK_MAX_RETRIES:
-                    await asyncio.sleep(CHUNK_RETRY_DELAY)
-                    continue
-                raise TranslationError(
-                    f"Chunk {index}/{len(chunks)} gagal setelah {CHUNK_MAX_RETRIES}x retry: {exc}"
-                ) from exc
-
-            text = (response.text or "").strip()
-            if text:
-                break
-            if attempt < CHUNK_MAX_RETRIES:
-                await asyncio.sleep(CHUNK_RETRY_DELAY)
-
-        if not text:
-            if last_error is not None:
-                raise TranslationError(
-                    f"Chunk {index}/{len(chunks)} gagal setelah {CHUNK_MAX_RETRIES}x retry: {last_error}"
-                )
-            raise TranslationError(
-                f"Chunk {index}/{len(chunks)} kosong dari model ({resolved.model}) "
-                f"setelah {CHUNK_MAX_RETRIES}x retry. Coba naikkan Max Tokens di Settings."
-            )
+        text = await _generate_chunk_with_retries(
+            resolved, prompt, system_prompt, index, len(chunks)
+        )
         translated_chunks.append(text)
         rolling = _tail(text)
 
@@ -268,6 +294,98 @@ async def translate_chapter(
         "title_translated": title_translated,
         "chunks": len(chunks),
         "translated_chars": len(translated),
+        "quality": quality,
+        "provider_type": resolved.provider_type,
+        "model": resolved.model,
+    }
+
+
+async def apply_reference_to_chapter(
+    chapter_id: int,
+    db_path: str | None = None,
+    on_progress: ProgressCallback | None = None,
+    max_chars: int = CHUNK_MAX_CHARS,
+) -> dict[str, Any]:
+    """Align an already-translated chapter with the latest reference sheet."""
+    with database.get_conn(db_path) as conn:
+        row = conn.execute("SELECT * FROM chapters WHERE id = ?", (chapter_id,)).fetchone()
+        if row is None:
+            raise TranslationError(f"Bab {chapter_id} tidak ditemukan")
+        chapter = dict(row)
+        novel_row = conn.execute(
+            "SELECT * FROM novels WHERE id = ?", (chapter["novel_id"],)
+        ).fetchone()
+    if novel_row is None:
+        raise TranslationError(f"Novel untuk bab {chapter_id} tidak ditemukan")
+    novel = dict(novel_row)
+
+    existing_translation = (chapter.get("translated_content") or "").strip()
+    if not existing_translation:
+        raise TranslationError(f"Bab {chapter_id} belum memiliki terjemahan")
+
+    reference = load_reference(chapter["novel_id"], db_path)
+    reference_block = reference_to_prompt(reference)
+    if not reference_block.strip():
+        raise TranslationError("Reference sheet masih kosong")
+
+    router = TaskRouter(TASK_NAME, db_path=db_path)
+    try:
+        resolved = router.resolve()
+    except TaskNotConfiguredError as exc:
+        raise TranslationError(
+            "Task 'translate' belum dikonfigurasi. Buka Settings → Model Routing "
+            f"per Proses dan pilih provider + model untuk Translate. ({exc})"
+        ) from exc
+
+    source_lang = novel.get("source_lang") or "zh"
+    target_lang = novel.get("target_lang") or "id"
+    system_prompt = APPLY_REFERENCE_SYSTEM_PROMPT.format(target=_lang_name(target_lang))
+
+    chunks = chunk_text(existing_translation, max_chars)
+    updated_chunks: list[str] = []
+    for index, chunk in enumerate(chunks, start=1):
+        await _emit(
+            on_progress,
+            {
+                "type": "chunk",
+                "chapter_id": chapter_id,
+                "chunk_index": index,
+                "chunk_total": len(chunks),
+                "chunk_chars": len(chunk),
+            },
+        )
+        prompt = APPLY_REFERENCE_PROMPT.format(reference=reference_block, text=chunk)
+        text = await _generate_chunk_with_retries(
+            resolved, prompt, system_prompt, index, len(chunks)
+        )
+        updated_chunks.append(text)
+
+    updated_translation = "\n\n".join(updated_chunks)
+    quality = score_translation(
+        updated_translation, source_lang, reference.get("terms") or []
+    )
+
+    now = database.utcnow()
+    with database.get_conn(db_path) as conn:
+        conn.execute(
+            """
+            UPDATE chapters
+               SET translated_content = ?, quality_score = ?, updated_at = ?
+             WHERE id = ?
+            """,
+            (updated_translation, quality["score"], now, chapter_id),
+        )
+        conn.execute(
+            "UPDATE novels SET updated_at = ? WHERE id = ?", (now, chapter["novel_id"])
+        )
+
+    return {
+        "chapter_id": chapter_id,
+        "chapter_number": chapter["chapter_number"],
+        "title": chapter.get("title") or "",
+        "title_translated": chapter.get("title_translated") or "",
+        "chunks": len(chunks),
+        "translated_chars": len(updated_translation),
         "quality": quality,
         "provider_type": resolved.provider_type,
         "model": resolved.model,

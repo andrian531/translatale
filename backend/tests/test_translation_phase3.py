@@ -670,3 +670,91 @@ def test_novel_jobs_listing(client, stub_llm):
     jobs = client.get(f"/api/novels/{novel['id']}/jobs").json()
     assert len(jobs) == 1
     assert jobs[0]["job_type"] == "translate"
+
+
+def test_term_romanized_and_keep_romanized_prompt_and_quality():
+    from core.quality import score_translation
+    from core.reference import format_term_target, reference_to_prompt
+
+    term_keep = {
+        "source": "丹田",
+        "romanized": "Dantian",
+        "target": "Pusat Energi",
+        "keep_romanized": True,
+    }
+    term_plain = {
+        "source": "灵气",
+        "romanized": "Lingqi",
+        "target": "Energi Spiritual",
+        "keep_romanized": False,
+    }
+    assert format_term_target(term_keep) == "Dantian (Pusat Energi)"
+    assert format_term_target(term_plain) == "Energi Spiritual"
+
+    prompt = reference_to_prompt(
+        {
+            "characters": [
+                {
+                    "name": "林风",
+                    "romanized_name": "Lin Feng",
+                    "relationships": "Kakak seperguruan Su Mei",
+                }
+            ],
+            "terms": [term_keep, term_plain],
+        }
+    )
+    assert "Dantian (Pusat Energi)" in prompt
+    assert "relasi: Kakak seperguruan Su Mei" in prompt
+    assert "灵气 (Lingqi) → Energi Spiritual" in prompt
+
+    good = score_translation(
+        "Ia memusatkan Energi Spiritual di dalam Dantian (Pusat Energi).",
+        "zh",
+        [term_keep, term_plain],
+    )
+    assert good["term_compliance"] == 50.0
+
+
+def test_apply_reference_endpoint_updates_translated_chapters(client, stub_llm):
+    novel = _create_novel(client)
+    ch = _add_chapter(client, novel["id"], "Bab 1", "丹田里的灵气")
+
+    # Rejects when no translated chapters exist yet.
+    empty_resp = client.post(f"/api/novels/{novel['id']}/reference/apply")
+    assert empty_resp.status_code == 422
+
+    # Populate translation & updated reference.
+    client.patch(
+        f"/api/chapters/{ch['id']}",
+        json={"translated_content": "Energi di dalam Pusat Energi.", "status": "translated"},
+    )
+    client.put(
+        f"/api/novels/{novel['id']}/reference",
+        json={
+            "terms": [
+                {
+                    "source": "丹田",
+                    "romanized": "Dantian",
+                    "target": "Pusat Energi",
+                    "keep_romanized": True,
+                }
+            ]
+        },
+    )
+
+    stub_llm.handler = lambda prompt, system: "Energi di dalam Dantian (Pusat Energi)."
+    resp = client.post(f"/api/novels/{novel['id']}/reference/apply")
+    assert resp.status_code == 202, resp.text
+    job = resp.json()
+    assert job["job_type"] == "apply_reference"
+
+    # Wait briefly for background job completion via polling.
+    for _ in range(30):
+        state = client.get(f"/api/jobs/{job['id']}").json()
+        if state["status"] in ("completed", "failed"):
+            break
+        time.sleep(0.05)
+
+    assert state["status"] == "completed"
+    updated = client.get(f"/api/chapters/{ch['id']}").json()
+    assert "Dantian (Pusat Energi)" in updated["translated_content"]

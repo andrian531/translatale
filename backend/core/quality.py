@@ -6,6 +6,8 @@ import re
 from difflib import SequenceMatcher
 from typing import Any, Iterable
 
+from core.reference import format_term_target
+
 #: Han, Hiragana, Katakana, Hangul and CJK compatibility ideographs.
 CJK_RE = re.compile(
     r"[\u3400-\u4dbf\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af\uf900-\ufaff]"
@@ -122,7 +124,7 @@ def score_translation(
     relevant: list[tuple[str, str]] = []
     for term in terms or []:
         source = str(term.get("source") or "").strip()
-        target = str(term.get("target") or "").strip()
+        target = format_term_target(term)
         if not target:
             continue
         if (source and source in text) or target in text:

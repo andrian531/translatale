@@ -176,6 +176,37 @@ def append_chapter_context(
     return save_reference(novel_id, reference, db_path)
 
 
+def format_term_target(term: dict[str, Any]) -> str:
+    """Return the expected rendered form of a glossary term."""
+    romanized = str(term.get("romanized") or "").strip()
+    target = str(term.get("target") or "").strip()
+    if term.get("keep_romanized") and romanized:
+        return f"{romanized} ({target})" if target else romanized
+    return target or romanized
+
+
+def _format_term_lines(entries: list[dict[str, Any]], limit: int) -> list[str]:
+    """Render glossary/location entries consistently for prompt injection."""
+    lines: list[str] = []
+    for entry in entries[:limit]:
+        source = str(entry.get("source") or "").strip()
+        expected = format_term_target(entry)
+        if not source or not expected:
+            continue
+        romanized = str(entry.get("romanized") or "").strip()
+        note = str(entry.get("note") or "").strip()
+        if entry.get("keep_romanized") and romanized:
+            line = f'- {source} → {expected} [WAJIB tulis persis "{expected}"]'
+        elif romanized:
+            line = f"- {source} ({romanized}) → {expected}"
+        else:
+            line = f"- {source} → {expected}"
+        if note:
+            line += f" ({note})"
+        lines.append(line)
+    return lines
+
+
 def reference_to_prompt(reference: dict[str, Any], max_characters: int = 40) -> str:
     """Render the reference as the prompt block the translator injects."""
     parts: list[str] = []
@@ -195,6 +226,8 @@ def reference_to_prompt(reference: dict[str, Any], max_characters: int = 40) -> 
                 for field in ("gender", "age", "notes")
                 if character.get(field)
             ]
+            if character.get("relationships"):
+                extras.append(f"relasi: {character['relationships']}")
             aliases = character.get("aliases") or []
             if aliases:
                 extras.append("alias: " + ", ".join(str(alias) for alias in aliases))
@@ -204,22 +237,13 @@ def reference_to_prompt(reference: dict[str, Any], max_characters: int = 40) -> 
 
     terms = reference.get("terms") or []
     if terms:
-        lines = [
-            f"- {term.get('source')} → {term.get('target')}"
-            + (f" ({term.get('note')})" if term.get("note") else "")
-            for term in terms[:80]
-            if term.get("source") and term.get("target")
-        ]
+        lines = _format_term_lines(terms, 80)
         if lines:
             parts.append("[GLOSSARY — mandatory]\n" + "\n".join(lines))
 
     locations = reference.get("locations") or []
     if locations:
-        lines = [
-            f"- {item.get('source')} → {item.get('target')}"
-            for item in locations[:40]
-            if item.get("source") and item.get("target")
-        ]
+        lines = _format_term_lines(locations, 40)
         if lines:
             parts.append("[PLACES]\n" + "\n".join(lines))
 
