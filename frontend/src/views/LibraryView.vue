@@ -235,6 +235,12 @@ onMounted(load)
             :alt="novel.title_translated || novel.title"
             class="aspect-[2/3] w-14 shrink-0 rounded-lg border border-ink-700 object-cover"
           />
+          <div
+            v-else
+            class="flex aspect-[2/3] w-14 shrink-0 items-center justify-center rounded-lg border border-dashed border-ink-700 bg-ink-850 text-[10px] font-medium uppercase tracking-wider text-slate-500"
+          >
+            N/A
+          </div>
           <div class="min-w-0 flex-1 space-y-1">
             <div class="flex items-start justify-between gap-2">
               <h2 class="text-sm font-semibold leading-snug text-slate-100">
