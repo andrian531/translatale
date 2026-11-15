@@ -75,10 +75,12 @@ class ProviderOut(BaseModel):
 class TaskPayload(BaseModel):
     provider_id: int | None = None
     model_name: str = ""
+    fallback_provider_id: int | None = None
+    fallback_model_name: str = ""
     temperature: float = Field(default=config.DEFAULT_TEMPERATURE, ge=0.0, le=2.0)
     max_tokens: int = Field(default=config.DEFAULT_MAX_TOKENS, ge=1, le=1_000_000)
 
-    @field_validator("model_name")
+    @field_validator("model_name", "fallback_model_name")
     @classmethod
     def _strip_model(cls, value: str) -> str:
         return (value or "").strip()
@@ -91,6 +93,10 @@ class TaskOut(BaseModel):
     provider_type: str | None
     provider_display_name: str | None
     model_name: str
+    fallback_provider_id: int | None = None
+    fallback_provider_type: str | None = None
+    fallback_provider_display_name: str | None = None
+    fallback_model_name: str = ""
     temperature: float
     max_tokens: int
     updated_at: str
@@ -165,6 +171,7 @@ def _fetch_provider(conn: sqlite3.Connection, provider_id: int) -> sqlite3.Row:
 
 def _task_row_to_out(row: sqlite3.Row) -> TaskOut:
     task_name = str(row["task_name"])
+    keys = row.keys()
     return TaskOut(
         task_name=task_name,
         label=config.TASK_LABELS.get(task_name, task_name),
@@ -172,6 +179,12 @@ def _task_row_to_out(row: sqlite3.Row) -> TaskOut:
         provider_type=row["provider_type"],
         provider_display_name=row["display_name"],
         model_name=row["model_name"] or "",
+        fallback_provider_id=row["fallback_provider_id"] if "fallback_provider_id" in keys else None,
+        fallback_provider_type=row["fallback_provider_type"] if "fallback_provider_type" in keys else None,
+        fallback_provider_display_name=(
+            row["fallback_display_name"] if "fallback_display_name" in keys else None
+        ),
+        fallback_model_name=(row["fallback_model_name"] or "") if "fallback_model_name" in keys else "",
         temperature=float(row["temperature"]),
         max_tokens=int(row["max_tokens"]),
         updated_at=row["updated_at"],
@@ -179,10 +192,15 @@ def _task_row_to_out(row: sqlite3.Row) -> TaskOut:
 
 
 TASK_SELECT = """
-SELECT t.task_name, t.provider_id, t.model_name, t.temperature, t.max_tokens,
-       t.updated_at, p.provider_type, p.display_name
+SELECT t.task_name, t.provider_id, t.model_name,
+       t.fallback_provider_id, t.fallback_model_name,
+       t.temperature, t.max_tokens, t.updated_at,
+       p.provider_type, p.display_name,
+       fp.provider_type AS fallback_provider_type,
+       fp.display_name AS fallback_display_name
 FROM task_models AS t
 LEFT JOIN provider_configs AS p ON p.id = t.provider_id
+LEFT JOIN provider_configs AS fp ON fp.id = t.fallback_provider_id
 """
 
 
@@ -307,6 +325,11 @@ def delete_provider(provider_id: int) -> dict[str, Any]:
         # Detach any task routed to this provider so routing stays consistent.
         conn.execute(
             "UPDATE task_models SET provider_id = NULL, updated_at = ? WHERE provider_id = ?",
+            (database.utcnow(), provider_id),
+        )
+        conn.execute(
+            "UPDATE task_models SET fallback_provider_id = NULL, updated_at = ? "
+            "WHERE fallback_provider_id = ?",
             (database.utcnow(), provider_id),
         )
         conn.execute("DELETE FROM provider_configs WHERE id = ?", (provider_id,))
@@ -440,6 +463,8 @@ def update_task(task_name: TaskName, payload: TaskPayload) -> TaskOut:
     with database.get_conn() as conn:
         if payload.provider_id is not None:
             _fetch_provider(conn, payload.provider_id)
+        if payload.fallback_provider_id is not None:
+            _fetch_provider(conn, payload.fallback_provider_id)
 
         exists = conn.execute(
             "SELECT 1 FROM task_models WHERE task_name = ?", (task_name,)
@@ -449,13 +474,16 @@ def update_task(task_name: TaskName, payload: TaskPayload) -> TaskOut:
             conn.execute(
                 """
                 INSERT INTO task_models
-                    (task_name, provider_id, model_name, temperature, max_tokens, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                    (task_name, provider_id, model_name, fallback_provider_id,
+                     fallback_model_name, temperature, max_tokens, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     task_name,
                     payload.provider_id,
                     payload.model_name,
+                    payload.fallback_provider_id,
+                    payload.fallback_model_name,
                     payload.temperature,
                     payload.max_tokens,
                     now,
@@ -465,13 +493,16 @@ def update_task(task_name: TaskName, payload: TaskPayload) -> TaskOut:
             conn.execute(
                 """
                 UPDATE task_models
-                   SET provider_id = ?, model_name = ?, temperature = ?,
-                       max_tokens = ?, updated_at = ?
+                   SET provider_id = ?, model_name = ?, fallback_provider_id = ?,
+                       fallback_model_name = ?, temperature = ?, max_tokens = ?,
+                       updated_at = ?
                  WHERE task_name = ?
                 """,
                 (
                     payload.provider_id,
                     payload.model_name,
+                    payload.fallback_provider_id,
+                    payload.fallback_model_name,
                     payload.temperature,
                     payload.max_tokens,
                     now,

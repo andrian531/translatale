@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -9,6 +10,23 @@ from typing import Any
 
 import config
 import database
+
+_REFUSAL_RE = re.compile(
+    r"(?:\bi(?:'m| am) sorry,?\s+i (?:can(?:not|'t)|am unable to)\b"
+    r"|\bi (?:can(?:not|'t)|am unable to) (?:translate|fulfill|assist with|process|complete)\b"
+    r"|\bas an ai\b.*\b(?:cannot|can't|unable)\b"
+    r"|\bviolates? (?:our |the )?(?:content|safety|usage) polic(?:y|ies)\b"
+    r"|\bmaaf,?\s+saya tidak (?:dapat|bisa) menerjemahkan\b)",
+    re.IGNORECASE,
+)
+
+
+def looks_like_refusal(text: str | None) -> bool:
+    """Detect short safety/policy refusals without false-positives on story prose."""
+    cleaned = (text or "").strip()
+    if not cleaned or len(cleaned) > 600:
+        return False
+    return bool(_REFUSAL_RE.search(cleaned))
 
 
 class LLMError(RuntimeError):
@@ -139,6 +157,35 @@ class TaskRouter:
                 (self.task_name,),
             ).fetchone()
 
+    def _build_resolved(
+        self,
+        provider_id: int,
+        provider_type: str,
+        api_key: str | None,
+        base_url: str | None,
+        model_name: str,
+        temperature: float,
+        max_tokens: int,
+    ) -> ResolvedTask:
+        # Imported lazily: registry imports the provider modules, which import
+        # this module.
+        from llm.registry import create_provider
+
+        provider = create_provider(
+            provider_type=provider_type,
+            api_key=api_key or "",
+            base_url=base_url or "",
+        )
+        return ResolvedTask(
+            task_name=self.task_name,
+            provider=provider,
+            provider_id=int(provider_id),
+            provider_type=provider_type,
+            model=model_name.strip(),
+            temperature=float(temperature),
+            max_tokens=int(max_tokens),
+        )
+
     def resolve(self) -> ResolvedTask:
         row = self._fetch()
         if row is None:
@@ -156,21 +203,40 @@ class TaskRouter:
                 f"Task '{self.task_name}' has no model name configured"
             )
 
-        # Imported lazily: registry imports the provider modules, which import
-        # this module.
-        from llm.registry import create_provider
-
-        provider = create_provider(
-            provider_type=row["provider_type"],
-            api_key=row["api_key"] or "",
-            base_url=row["base_url"] or "",
-        )
-        return ResolvedTask(
-            task_name=self.task_name,
-            provider=provider,
+        return self._build_resolved(
             provider_id=int(row["provider_id"]),
             provider_type=row["provider_type"],
-            model=row["model_name"].strip(),
+            api_key=row["api_key"],
+            base_url=row["base_url"],
+            model_name=row["model_name"],
+            temperature=float(row["temperature"]),
+            max_tokens=int(row["max_tokens"]),
+        )
+
+    def resolve_fallback(self) -> ResolvedTask | None:
+        """Resolve the optional secondary/fallback model for this task, or None."""
+        with database.get_conn(self.db_path) as conn:
+            row = conn.execute(
+                """
+                SELECT t.fallback_provider_id, t.fallback_model_name,
+                       t.temperature, t.max_tokens,
+                       p.provider_type, p.api_key, p.base_url, p.is_enabled
+                FROM task_models AS t
+                LEFT JOIN provider_configs AS p ON p.id = t.fallback_provider_id
+                WHERE t.task_name = ?
+                """,
+                (self.task_name,),
+            ).fetchone()
+        if row is None or row["fallback_provider_id"] is None:
+            return None
+        if not row["is_enabled"] or not (row["fallback_model_name"] or "").strip():
+            return None
+        return self._build_resolved(
+            provider_id=int(row["fallback_provider_id"]),
+            provider_type=row["provider_type"],
+            api_key=row["api_key"],
+            base_url=row["base_url"],
+            model_name=row["fallback_model_name"],
             temperature=float(row["temperature"]),
             max_tokens=int(row["max_tokens"]),
         )

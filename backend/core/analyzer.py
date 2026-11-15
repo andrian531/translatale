@@ -14,7 +14,7 @@ from core.reference import (
     merge_reference,
     save_reference,
 )
-from llm.base import LLMError, TaskNotConfiguredError, TaskRouter
+from llm.base import LLMError, ResolvedTask, TaskNotConfiguredError, TaskRouter, looks_like_refusal
 
 TASK_NAME = "story_analysis"
 
@@ -201,6 +201,75 @@ def _render_chapters(chapters: list[dict[str, Any]], max_chars: int) -> str:
     return "\n\n".join(blocks)
 
 
+async def _generate_analysis_with_fallback(
+    resolved: ResolvedTask,
+    fallback: ResolvedTask | None,
+    *,
+    prompt: str,
+    system_prompt: str,
+    temperature: float,
+    max_tokens: int,
+    expect_json: bool = False,
+) -> tuple[str, dict[str, Any] | None, ResolvedTask]:
+    """Run an analysis LLM call, falling back to secondary model on error/refusal/bad JSON."""
+    candidates = [resolved] + ([fallback] if fallback is not None else [])
+    last_error: LLMError | None = None
+    last_text = ""
+    last_candidate = resolved
+
+    for index, candidate in enumerate(candidates):
+        last_candidate = candidate
+        try:
+            response = await candidate.provider.generate(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                model=candidate.model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+        except LLMError as exc:
+            last_error = exc
+            if index + 1 < len(candidates):
+                logger.warning(
+                    "Analysis primary model (%s) error (%s); trying fallback (%s)",
+                    candidate.model,
+                    exc,
+                    candidates[index + 1].model,
+                )
+                continue
+            raise
+
+        last_text = response.text or ""
+        if not last_text.strip() or looks_like_refusal(last_text):
+            if index + 1 < len(candidates):
+                logger.warning(
+                    "Analysis primary model (%s) empty/refused; trying fallback (%s)",
+                    candidate.model,
+                    candidates[index + 1].model,
+                )
+                continue
+            return last_text, None, candidate
+
+        if expect_json:
+            parsed = _parse_json(last_text)
+            if parsed is not None:
+                return last_text, parsed, candidate
+            if index + 1 < len(candidates):
+                logger.warning(
+                    "Analysis primary model (%s) invalid JSON; trying fallback (%s)",
+                    candidate.model,
+                    candidates[index + 1].model,
+                )
+                continue
+            return last_text, None, candidate
+
+        return last_text, None, candidate
+
+    if last_error is not None:
+        raise last_error
+    return last_text, None, last_candidate
+
+
 async def analyze_novel(
     novel_id: int,
     chapter_ids: list[int] | None = None,
@@ -232,6 +301,8 @@ async def analyze_novel(
             f"per Proses dan pilih provider + model untuk Analisa Cerita. ({exc})"
         ) from exc
 
+    fallback = router.resolve_fallback()
+
     prompt = ANALYSIS_PROMPT.format(
         target_lang=_novel_target_lang(novel_id, db_path),
         existing=json.dumps(existing_payload, ensure_ascii=False)[:4000],
@@ -239,31 +310,32 @@ async def analyze_novel(
     )
 
     try:
-        response = await resolved.provider.generate(
+        raw_text, parsed, used = await _generate_analysis_with_fallback(
+            resolved,
+            fallback,
             prompt=prompt,
             system_prompt=ANALYSIS_SYSTEM_PROMPT,
-            model=resolved.model,
             temperature=resolved.temperature,
             max_tokens=resolved.max_tokens,
+            expect_json=True,
         )
     except LLMError as exc:
         raise AnalysisError(f"Analisis cerita gagal: {exc}") from exc
 
-    parsed = _parse_json(response.text)
     if parsed is None:
-        raw_preview = re.sub(r"\s+", " ", (response.text or "").strip())[:180]
+        raw_preview = re.sub(r"\s+", " ", raw_text.strip())[:180]
         logger.warning(
             "analyze_novel invalid JSON from model %s: %r",
-            resolved.model,
-            (response.text or "")[:500],
+            used.model,
+            raw_text[:500],
         )
         if not raw_preview:
             raise AnalysisError(
-                f"Model ({resolved.model}) mengembalikan respons kosong untuk analisa cerita. "
+                f"Model ({used.model}) mengembalikan respons kosong untuk analisa cerita. "
                 "Coba naikkan Max Tokens di Settings atau ganti model."
             )
         raise AnalysisError(
-            f"Model ({resolved.model}) tidak mengembalikan JSON yang valid untuk analisa cerita: "
+            f"Model ({used.model}) tidak mengembalikan JSON yang valid untuk analisa cerita: "
             f"{raw_preview}"
         )
 
@@ -321,11 +393,13 @@ async def update_reference_from_chapter(
     if not text:
         return counts
 
+    router = TaskRouter(TASK_NAME, db_path=db_path)
     try:
-        resolved = TaskRouter(TASK_NAME, db_path=db_path).resolve()
+        resolved = router.resolve()
     except TaskNotConfiguredError:
         # Auto-update is a bonus; translation must still run.
         return counts
+    fallback = router.resolve_fallback()
 
     existing = load_reference(chapter["novel_id"], db_path)
     existing_payload = {
@@ -343,12 +417,14 @@ async def update_reference_from_chapter(
     )
 
     try:
-        response = await resolved.provider.generate(
+        _, parsed, _ = await _generate_analysis_with_fallback(
+            resolved,
+            fallback,
             prompt=prompt,
             system_prompt=ANALYSIS_SYSTEM_PROMPT,
-            model=resolved.model,
             temperature=min(resolved.temperature, 0.3),
             max_tokens=min(resolved.max_tokens, 2000),
+            expect_json=True,
         )
     except LLMError as exc:
         logger.warning(
@@ -356,7 +432,6 @@ async def update_reference_from_chapter(
         )
         return counts
 
-    parsed = _parse_json(response.text)
     if parsed is None:
         logger.warning(
             "Auto-update referensi bab %s dilewati: model tidak mengembalikan JSON valid",
@@ -410,6 +485,8 @@ async def summarize_chapter_for_context(
             f"per Proses dan pilih provider + model untuk Analisa Cerita. ({exc})"
         ) from exc
 
+    fallback = router.resolve_fallback()
+
     prompt = SUMMARY_PROMPT.format(
         target_chars=target_chars,
         title=chapter.get("title") or f"Chapter {chapter.get('chapter_number')}",
@@ -417,17 +494,19 @@ async def summarize_chapter_for_context(
     )
 
     try:
-        response = await resolved.provider.generate(
+        raw_text, _, _ = await _generate_analysis_with_fallback(
+            resolved,
+            fallback,
             prompt=prompt,
             system_prompt=SUMMARY_SYSTEM_PROMPT,
-            model=resolved.model,
             temperature=min(resolved.temperature, 0.5),
             max_tokens=min(resolved.max_tokens, 800),
+            expect_json=False,
         )
     except LLMError as exc:
         raise AnalysisError(f"Ringkasan bab gagal: {exc}") from exc
 
-    summary = re.sub(r"\s+", " ", response.text or "").strip()
+    summary = re.sub(r"\s+", " ", raw_text).strip()
     if not summary:
         raise AnalysisError("Model mengembalikan ringkasan kosong")
     summary = summary[: target_chars + 50]

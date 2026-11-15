@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import logging
 import re
 from typing import Any, Awaitable, Callable
 
 import database
 from core.quality import deduplicate_raw_text, score_translation
 from core.reference import load_reference, reference_to_prompt
-from llm.base import LLMError, TaskNotConfiguredError, TaskRouter
+from llm.base import LLMError, ResolvedTask, TaskNotConfiguredError, TaskRouter, looks_like_refusal
+
+logger = logging.getLogger(__name__)
 
 TASK_NAME = "translate"
 
@@ -138,16 +141,16 @@ def _tail(text: str, limit: int = ROLLING_CONTEXT_CHARS) -> str:
     return cleaned[-limit:] if len(cleaned) > limit else cleaned
 
 
-async def _generate_chunk_with_retries(
-    resolved: Any,
+async def _try_resolved_chunk(
+    resolved: ResolvedTask,
     prompt: str,
     system_prompt: str,
     index: int,
     total_chunks: int,
 ) -> str:
-    """Call LLM for a chunk with retries on LLMError or empty output."""
-    text = ""
+    """Run one chunk against a single ResolvedTask with retries."""
     last_error: LLMError | None = None
+    refused = False
     for attempt in range(CHUNK_MAX_RETRIES + 1):
         try:
             response = await resolved.provider.generate(
@@ -167,11 +170,18 @@ async def _generate_chunk_with_retries(
             ) from exc
 
         text = (response.text or "").strip()
-        if text:
+        if text and not looks_like_refusal(text):
             return text
+        if text and looks_like_refusal(text):
+            refused = True
+            break
         if attempt < CHUNK_MAX_RETRIES:
             await asyncio.sleep(CHUNK_RETRY_DELAY)
 
+    if refused:
+        raise TranslationError(
+            f"Chunk {index}/{total_chunks} ditolak oleh model ({resolved.model})"
+        )
     if last_error is not None:
         raise TranslationError(
             f"Chunk {index}/{total_chunks} gagal setelah {CHUNK_MAX_RETRIES}x retry: {last_error}"
@@ -180,6 +190,31 @@ async def _generate_chunk_with_retries(
         f"Chunk {index}/{total_chunks} kosong dari model ({resolved.model}) "
         f"setelah {CHUNK_MAX_RETRIES}x retry. Coba naikkan Max Tokens di Settings."
     )
+
+
+async def _generate_chunk_with_retries(
+    resolved: ResolvedTask,
+    prompt: str,
+    system_prompt: str,
+    index: int,
+    total_chunks: int,
+    fallback: ResolvedTask | None = None,
+) -> str:
+    """Call primary LLM for a chunk; fall back to secondary model if primary fails/refuses."""
+    try:
+        return await _try_resolved_chunk(resolved, prompt, system_prompt, index, total_chunks)
+    except TranslationError as primary_exc:
+        if fallback is None:
+            raise
+        logger.warning(
+            "Chunk %d/%d primary model (%s) gagal/menolak (%s); mencoba fallback (%s)",
+            index,
+            total_chunks,
+            resolved.model,
+            primary_exc,
+            fallback.model,
+        )
+        return await _try_resolved_chunk(fallback, prompt, system_prompt, index, total_chunks)
 
 
 async def translate_chapter(
@@ -216,6 +251,7 @@ async def translate_chapter(
             "Task 'translate' belum dikonfigurasi. Buka Settings → Model Routing "
             f"per Proses dan pilih provider + model untuk Translate. ({exc})"
         ) from exc
+    fallback = router.resolve_fallback()
 
     source_lang = novel.get("source_lang") or "zh"
     target_lang = novel.get("target_lang") or "id"
@@ -264,7 +300,7 @@ async def translate_chapter(
             text=chunk,
         )
         text = await _generate_chunk_with_retries(
-            resolved, prompt, system_prompt, index, len(chunks)
+            resolved, prompt, system_prompt, index, len(chunks), fallback=fallback
         )
         translated_chunks.append(text)
         rolling = _tail(text)
@@ -336,6 +372,7 @@ async def apply_reference_to_chapter(
             "Task 'translate' belum dikonfigurasi. Buka Settings → Model Routing "
             f"per Proses dan pilih provider + model untuk Translate. ({exc})"
         ) from exc
+    fallback = router.resolve_fallback()
 
     source_lang = novel.get("source_lang") or "zh"
     target_lang = novel.get("target_lang") or "id"
@@ -356,7 +393,7 @@ async def apply_reference_to_chapter(
         )
         prompt = APPLY_REFERENCE_PROMPT.format(reference=reference_block, text=chunk)
         text = await _generate_chunk_with_retries(
-            resolved, prompt, system_prompt, index, len(chunks)
+            resolved, prompt, system_prompt, index, len(chunks), fallback=fallback
         )
         updated_chunks.append(text)
 

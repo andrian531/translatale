@@ -28,12 +28,14 @@ CREATE TABLE IF NOT EXISTS provider_configs (
 );
 
 CREATE TABLE IF NOT EXISTS task_models (
-    task_name   TEXT    PRIMARY KEY,
-    provider_id INTEGER REFERENCES provider_configs(id) ON DELETE SET NULL,
-    model_name  TEXT    NOT NULL DEFAULT '',
-    temperature REAL    NOT NULL DEFAULT 0.7,
-    max_tokens  INTEGER NOT NULL DEFAULT 4096,
-    updated_at  TEXT    NOT NULL
+    task_name            TEXT    PRIMARY KEY,
+    provider_id          INTEGER REFERENCES provider_configs(id) ON DELETE SET NULL,
+    model_name           TEXT    NOT NULL DEFAULT '',
+    fallback_provider_id INTEGER REFERENCES provider_configs(id) ON DELETE SET NULL,
+    fallback_model_name  TEXT    NOT NULL DEFAULT '',
+    temperature          REAL    NOT NULL DEFAULT 0.7,
+    max_tokens           INTEGER NOT NULL DEFAULT 4096,
+    updated_at           TEXT    NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS novels (
@@ -149,6 +151,8 @@ def get_conn(db_path: Path | str | None = None) -> Iterator[sqlite3.Connection]:
 COLUMN_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("provider_configs", "available_models", "TEXT NOT NULL DEFAULT '[]'"),
     ("novels", "synopsis_translated", "TEXT NOT NULL DEFAULT ''"),
+    ("task_models", "fallback_provider_id", "INTEGER REFERENCES provider_configs(id) ON DELETE SET NULL"),
+    ("task_models", "fallback_model_name", "TEXT NOT NULL DEFAULT ''"),
 )
 
 

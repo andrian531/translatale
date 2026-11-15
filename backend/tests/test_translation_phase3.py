@@ -758,3 +758,98 @@ def test_apply_reference_endpoint_updates_translated_chapters(client, stub_llm):
     assert state["status"] == "completed"
     updated = client.get(f"/api/chapters/{ch['id']}").json()
     assert "Dantian (Pusat Energi)" in updated["translated_content"]
+
+
+def test_translate_falls_back_to_secondary_model_on_refusal(client, stub_llm, monkeypatch):
+    from llm.base import ResolvedTask, TaskRouter
+
+    # Verify settings API persists fallback fields cleanly.
+    tasks = {t["task_name"]: t for t in client.get("/api/settings/tasks").json()}
+    translate_task = tasks["translate"]
+    resp = client.put(
+        "/api/settings/tasks/translate",
+        json={
+            "provider_id": translate_task["provider_id"],
+            "model_name": "primary-censored",
+            "fallback_provider_id": translate_task["provider_id"],
+            "fallback_model_name": "secondary-uncensored",
+            "temperature": translate_task["temperature"],
+            "max_tokens": translate_task["max_tokens"],
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["fallback_model_name"] == "secondary-uncensored"
+
+    monkeypatch.setattr(
+        TaskRouter,
+        "resolve_fallback",
+        lambda self: ResolvedTask(
+            task_name=self.task_name,
+            provider=stub_llm,
+            provider_id=1,
+            provider_type="stub",
+            model="secondary-uncensored",
+            temperature=0.3,
+            max_tokens=4096,
+        ),
+    )
+
+    novel = _create_novel(client)
+    ch = _add_chapter(client, novel["id"], "Bab 1", "Adegan pertarungan intens.")
+
+    calls = []
+
+    def handler(prompt, system):
+        calls.append(prompt)
+        if "chapter title" in prompt.lower():
+            return "Bab 1"
+        if len(calls) == 2:
+            return "I'm sorry, I cannot translate this content."
+        return "Terjemahan berhasil oleh model cadangan."
+
+    stub_llm.handler = handler
+    result = asyncio.run(translate_chapter(ch["id"]))
+    assert "Terjemahan berhasil oleh model cadangan." in (
+        client.get(f"/api/chapters/{ch['id']}").json()["translated_content"]
+    )
+    assert result["chunks"] == 1
+
+
+def test_analyze_falls_back_to_secondary_model_on_refusal(client, stub_llm, monkeypatch):
+    from llm.base import ResolvedTask, TaskRouter
+
+    monkeypatch.setattr(
+        TaskRouter,
+        "resolve_fallback",
+        lambda self: ResolvedTask(
+            task_name=self.task_name,
+            provider=stub_llm,
+            provider_id=1,
+            provider_type="stub",
+            model="secondary-uncensored",
+            temperature=0.3,
+            max_tokens=4096,
+        ),
+    )
+
+    novel = _create_novel(client)
+    _add_chapter(client, novel["id"], "Bab 1", "林风来到青云宗。")
+
+    calls = []
+
+    def handler(prompt, system):
+        calls.append(prompt)
+        if len(calls) == 1:
+            return "I'm sorry, I cannot assist with that request."
+        return json.dumps(
+            {
+                "characters": [{"name": "林风", "romanized_name": "Lin Feng"}],
+                "locations": [],
+                "terms": [],
+                "translation_guide": "Formal tone.",
+            }
+        )
+
+    stub_llm.handler = handler
+    result = asyncio.run(analyze_novel(novel["id"]))
+    assert result["counts"]["characters"] == 1

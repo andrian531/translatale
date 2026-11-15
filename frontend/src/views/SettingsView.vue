@@ -97,6 +97,11 @@ function modelsForTask(task) {
   return providerById(draft?.provider_id)?.available_models ?? []
 }
 
+function fallbackModelsForTask(task) {
+  const draft = taskDrafts[task.task_name]
+  return providerById(draft?.fallback_provider_id)?.available_models ?? []
+}
+
 function providerLabel(type) {
   return providerTypes.value.find((item) => item.value === type)?.label ?? type
 }
@@ -167,6 +172,8 @@ async function loadTasks() {
     taskDrafts[task.task_name] = {
       provider_id: task.provider_id,
       model_name: task.model_name,
+      fallback_provider_id: task.fallback_provider_id ?? null,
+      fallback_model_name: task.fallback_model_name ?? '',
       temperature: task.temperature,
       max_tokens: task.max_tokens,
     }
@@ -311,6 +318,8 @@ async function saveTask(task) {
     const updated = await settingsApi.saveTask(task.task_name, {
       provider_id: draft.provider_id ?? null,
       model_name: draft.model_name ?? '',
+      fallback_provider_id: draft.fallback_provider_id ?? null,
+      fallback_model_name: draft.fallback_model_name ?? '',
       temperature: Number(draft.temperature),
       max_tokens: Number(draft.max_tokens),
     })
@@ -712,6 +721,43 @@ onMounted(loadAll)
                   type="number"
                   min="1"
                   step="1"
+                />
+              </div>
+            </div>
+
+            <div class="rounded-lg border border-ink-800/80 bg-ink-950/40 p-3 space-y-2.5">
+              <div>
+                <p class="text-xs font-medium text-slate-300">Model Cadangan (Fallback)</p>
+                <p class="text-[11px] text-slate-500">
+                  Opsional — dipakai otomatis jika model utama gagal, kosong, atau menolak konten.
+                </p>
+              </div>
+              <div>
+                <label class="label" :for="`fb-provider-${task.task_name}`">Provider Cadangan</label>
+                <select
+                  :id="`fb-provider-${task.task_name}`"
+                  v-model="taskDrafts[task.task_name].fallback_provider_id"
+                  class="input"
+                >
+                  <option :value="null">— tidak pakai fallback —</option>
+                  <option v-for="provider in providers" :key="provider.id" :value="provider.id">
+                    {{ providerOptionLabel(provider) }}
+                    <template v-if="!provider.is_enabled"> (nonaktif)</template>
+                  </option>
+                </select>
+              </div>
+              <div>
+                <label class="label">Model Cadangan</label>
+                <ModelSelect
+                  v-model="taskDrafts[task.task_name].fallback_model_name"
+                  :models="fallbackModelsForTask(task)"
+                  :disabled="!taskDrafts[task.task_name].fallback_provider_id"
+                  placeholder="Pilih atau ketik nama model cadangan"
+                  :empty-hint="
+                    taskDrafts[task.task_name].fallback_provider_id
+                      ? 'Belum ada model tersimpan. Klik Sync Model di atas, atau ketik manual.'
+                      : 'Pilih provider cadangan dulu.'
+                  "
                 />
               </div>
             </div>
