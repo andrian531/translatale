@@ -1440,101 +1440,109 @@ onBeforeUnmount(stopStream)
 
       <!-- ===================== TAB: chapters ===================== -->
       <template v-if="tab === 'chapters'">
-        <div class="mb-5 flex flex-wrap items-center gap-2">
-          <button
-            class="btn-primary"
-            :disabled="!translatableSelected.length || jobActive"
-            @click="startTranslate"
-          >
-            {{ t('workspace.actions.translateSelected', { count: translatableSelected.length }) }}
-          </button>
-          <button
-            class="btn-primary"
-            :disabled="!nextUntranslatedBatch.length || jobActive"
-            @click="startTranslateNext"
-          >
-            {{ t('workspace.actions.translateNext', { count: nextUntranslatedBatch.length }) }}
-          </button>
-          <button
-            class="btn-danger"
-            :disabled="!clearableSelected.length || jobActive || clearing"
-            :title="t('workspace.tooltips.clearSelected')"
-            @click="clearSelectedTranslations"
-          >
-            {{ t('workspace.actions.clearTranslations', { count: clearableSelected.length }) }}
-          </button>
-          <button class="btn-ghost" :disabled="jobActive" @click="startAnalyze">
-            {{ t('workspace.actions.analyze') }}
-          </button>
+        <div class="mb-5 flex flex-col gap-2">
+          <!-- Row 1: Translation & AI Analysis -->
+          <div class="flex flex-wrap items-center gap-2">
+            <button
+              class="btn-primary"
+              :disabled="!translatableSelected.length || jobActive"
+              @click="startTranslate"
+            >
+              {{ t('workspace.actions.translateSelected', { count: translatableSelected.length }) }}
+            </button>
+            <button
+              class="btn-primary"
+              :disabled="!nextUntranslatedBatch.length || jobActive"
+              @click="startTranslateNext"
+            >
+              {{ t('workspace.actions.translateNext', { count: nextUntranslatedBatch.length }) }}
+            </button>
+            <button
+              class="btn-danger"
+              :disabled="!clearableSelected.length || jobActive || clearing"
+              :title="t('workspace.tooltips.clearSelected')"
+              @click="clearSelectedTranslations"
+            >
+              {{ t('workspace.actions.clearTranslations', { count: clearableSelected.length }) }}
+            </button>
+            <button class="btn-ghost" :disabled="jobActive" @click="startAnalyze">
+              {{ t('workspace.actions.analyze') }}
+            </button>
 
-          <label
-            class="flex cursor-pointer select-none items-center gap-1.5 rounded-lg border border-ink-700 bg-ink-850 px-2.5 py-1.5 text-[11px] text-slate-300"
-            for="auto-update-reference"
-            :title="t('workspace.tooltips.autoReference')"
-          >
-            <input
-              id="auto-update-reference"
-              v-model="autoUpdateReference"
-              type="checkbox"
-              class="h-3.5 w-3.5 accent-indigo-500"
-            />
-            {{ t('workspace.actions.autoReference') }}
-          </label>
+            <label
+              class="flex cursor-pointer select-none items-center gap-1.5 rounded-lg border border-ink-700 bg-ink-850 px-2.5 py-1.5 text-[11px] text-slate-300"
+              for="auto-update-reference"
+              :title="t('workspace.tooltips.autoReference')"
+            >
+              <input
+                id="auto-update-reference"
+                v-model="autoUpdateReference"
+                type="checkbox"
+                class="h-3.5 w-3.5 accent-indigo-500"
+              />
+              {{ t('workspace.actions.autoReference') }}
+            </label>
+          </div>
 
-          <span class="mx-1 h-5 w-px self-center bg-ink-700" />
-
-          <button
-            class="btn-ghost"
-            :disabled="jobActive || fetching || !novel.pending_count"
-            :title="
-              novel.pending_count
-                ? t('workspace.tooltips.fetchBatch', {
-                    count: Math.min(fetchBatchSize, novel.pending_count),
+          <!-- Row 2: Fetch / Scrape & Manual Chapter Input -->
+          <div class="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <div class="flex flex-wrap items-center gap-2">
+              <button
+                class="btn-ghost"
+                :disabled="jobActive || fetching || !novel.pending_count"
+                :title="
+                  novel.pending_count
+                    ? t('workspace.tooltips.fetchBatch', {
+                        count: Math.min(fetchBatchSize, novel.pending_count),
+                      })
+                    : t('workspace.tooltips.noPending')
+                "
+                @click="fetchBatch"
+              >
+                {{
+                  t('workspace.actions.fetchBatch', {
+                    count: Math.min(fetchBatchSize, novel.pending_count || 0),
                   })
-                : t('workspace.tooltips.noPending')
-            "
-            @click="fetchBatch"
-          >
-            {{
-              t('workspace.actions.fetchBatch', {
-                count: Math.min(fetchBatchSize, novel.pending_count || 0),
-              })
-            }}
-          </button>
-          <button
-            class="btn-ghost"
-            :disabled="jobActive || fetching || !pendingSelected.length"
-            @click="fetchSelected"
-          >
-            {{ t('workspace.actions.fetchSelected', { count: pendingSelected.length }) }}
-          </button>
-          <button class="btn-ghost" @click="openUrlModal">
-            {{ t('workspace.actions.addFromUrl') }}
-          </button>
-          <button
-            v-if="novel.source_url"
-            class="btn-ghost"
-            :disabled="jobActive || syncingUrl"
-            :title="t('workspace.tooltips.sync')"
-            @click="syncFromSource"
-          >
-            {{ syncingUrl ? t('workspace.actions.checking') : t('workspace.actions.checkNewChapters') }}
-          </button>
+                }}
+              </button>
+              <button
+                class="btn-ghost"
+                :disabled="jobActive || fetching || !pendingSelected.length"
+                @click="fetchSelected"
+              >
+                {{ t('workspace.actions.fetchSelected', { count: pendingSelected.length }) }}
+              </button>
+              <button class="btn-ghost" @click="openUrlModal">
+                {{ t('workspace.actions.addFromUrl') }}
+              </button>
+              <button
+                v-if="novel.source_url"
+                class="btn-ghost"
+                :disabled="jobActive || syncingUrl"
+                :title="t('workspace.tooltips.sync')"
+                @click="syncFromSource"
+              >
+                {{ syncingUrl ? t('workspace.actions.checking') : t('workspace.actions.checkNewChapters') }}
+              </button>
+            </div>
 
-          <span class="mx-1 h-5 w-px self-center bg-ink-700" />
+            <span class="hidden h-5 w-px bg-ink-700 sm:inline-block" />
 
-          <button class="btn-ghost" @click="openManual">{{ t('workspace.actions.addManual') }}</button>
-          <button class="btn-ghost" :disabled="uploading" @click="pickFiles">
-            {{ uploading ? t('workspace.actions.uploading') : t('workspace.actions.uploadTxt') }}
-          </button>
-          <input
-            ref="fileInput"
-            type="file"
-            accept=".txt,text/plain"
-            multiple
-            class="hidden"
-            @change="onFilesChosen"
-          />
+            <div class="flex flex-wrap items-center gap-2">
+              <button class="btn-ghost" @click="openManual">{{ t('workspace.actions.addManual') }}</button>
+              <button class="btn-ghost" :disabled="uploading" @click="pickFiles">
+                {{ uploading ? t('workspace.actions.uploading') : t('workspace.actions.uploadTxt') }}
+              </button>
+              <input
+                ref="fileInput"
+                type="file"
+                accept=".txt,text/plain"
+                multiple
+                class="hidden"
+                @change="onFilesChosen"
+              />
+            </div>
+          </div>
         </div>
 
         <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
