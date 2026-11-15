@@ -58,6 +58,14 @@ const editForm = reactive({ title: '', raw_content: '', translated_content: '' }
 const savingEdit = ref(false)
 const editPane = ref('both')
 
+// -- translate options --------------------------------------------------
+const AUTO_REF_KEY = 'translatale:auto-reference'
+const autoUpdateReference = ref(localStorage.getItem(AUTO_REF_KEY) !== '0')
+const contextWarning = ref(null)
+watch(autoUpdateReference, (value) => {
+  localStorage.setItem(AUTO_REF_KEY, value ? '1' : '0')
+})
+
 // -- synopsis panel -----------------------------------------------------
 const synopsisExpanded = ref(false)
 const showRawSynopsis = ref(false)
@@ -118,6 +126,16 @@ const translatableSelected = computed(() =>
 const pendingSelected = computed(() =>
   selectedChapters.value.filter((chapter) => chapter.status === 'pending_fetch'),
 )
+
+const clearableSelected = computed(() =>
+  selectedChapters.value.filter(
+    (chapter) =>
+      chapter.status === 'translated' ||
+      chapter.status === 'error' ||
+      (chapter.translated_content || '').trim(),
+  ),
+)
+const clearing = ref(false)
 
 const allVisibleSelected = computed(
   () =>
@@ -229,6 +247,10 @@ function watchJob(jobId) {
       if (event.type === 'chapter' || event.type === 'chapter_done') {
         jobChunk.value = null
       }
+      if (event.type === 'reference_update' && !referenceDirty.value) {
+        // New characters/terms landed: show them in the reference tab right away.
+        loadReference()
+      }
       if (job.value) {
         job.value = {
           ...job.value,
@@ -261,11 +283,14 @@ function watchJob(jobId) {
   })
 }
 
-async function startTranslate() {
-  const ids = translatableSelected.value.map((chapter) => chapter.id)
+async function runTranslateWithIds(ids) {
   if (!ids.length) return
   try {
-    const started = await translationApi.startTranslate(novelId.value, ids)
+    const started = await translationApi.startTranslate(
+      novelId.value,
+      ids,
+      autoUpdateReference.value,
+    )
     job.value = started
     jobMessage.value = started.message
     watchJob(started.id)
@@ -273,6 +298,59 @@ async function startTranslate() {
   } catch (err) {
     flash('error', `Gagal memulai translate: ${err.message}`)
   }
+}
+
+async function startTranslate() {
+  const selectedList = translatableSelected.value
+  const ids = selectedList.map((chapter) => chapter.id)
+  if (!ids.length) return
+
+  const minSelectedNo = Math.min(...selectedList.map((chapter) => chapter.chapter_number))
+  const earlierUntranslated = chapters.value.filter(
+    (chapter) => chapter.chapter_number < minSelectedNo && chapter.status !== 'translated',
+  )
+  if (!earlierUntranslated.length) {
+    await runTranslateWithIds(ids)
+    return
+  }
+
+  const earlierReady = earlierUntranslated.filter(
+    (chapter) => chapter.status === 'raw' || chapter.status === 'error',
+  )
+  const earlierPending = earlierUntranslated.filter(
+    (chapter) => chapter.status === 'pending_fetch',
+  )
+  const sample = earlierUntranslated
+    .slice(0, 5)
+    .map((chapter) => `Bab ${chapter.chapter_number}`)
+    .join(', ')
+  contextWarning.value = {
+    minSelectedNo,
+    earlierCount: earlierUntranslated.length,
+    earlierSample: earlierUntranslated.length > 5 ? `${sample}, …` : sample,
+    earlierReadyIds: earlierReady.map((chapter) => chapter.id),
+    pendingCount: earlierPending.length,
+    selectedIds: ids,
+  }
+}
+
+async function confirmTranslateEarlier() {
+  const warn = contextWarning.value
+  contextWarning.value = null
+  if (!warn) return
+  if (!warn.earlierReadyIds.length) {
+    flash('error', 'Bab sebelumnya masih berstatus pending fetch. Jalankan Fetch Raw terlebih dahulu.')
+    return
+  }
+  const combined = Array.from(new Set([...warn.earlierReadyIds, ...warn.selectedIds]))
+  await runTranslateWithIds(combined)
+}
+
+async function confirmTranslateAnyway() {
+  const warn = contextWarning.value
+  contextWarning.value = null
+  if (!warn) return
+  await runTranslateWithIds(warn.selectedIds)
 }
 
 async function startAnalyze() {
@@ -327,6 +405,49 @@ async function fetchSelected() {
     await startFetch({ chapterIds: ids })
   } finally {
     fetching.value = false
+  }
+}
+
+async function clearSelectedTranslations() {
+  const ids = clearableSelected.value.map((chapter) => chapter.id)
+  if (!ids.length) return
+  if (
+    !window.confirm(
+      `Hapus hasil terjemahan untuk ${ids.length} bab terpilih? Teks sumber (raw) akan tetap disimpan dan status di-reset ke raw.`,
+    )
+  ) {
+    return
+  }
+  clearing.value = true
+  try {
+    const res = await novelsApi.clearTranslations(novelId.value, ids)
+    selected.value = []
+    await load()
+    flash('success', `Terjemahan ${res.cleared} bab dihapus (teks raw tetap aman).`)
+  } catch (err) {
+    flash('error', `Gagal menghapus terjemahan: ${err.message}`)
+  } finally {
+    clearing.value = false
+  }
+}
+
+async function clearSingleTranslation(chapter) {
+  if (
+    !window.confirm(
+      `Hapus hasil terjemahan Bab ${chapter.chapter_number}? Teks sumber (raw) akan tetap disimpan.`,
+    )
+  ) {
+    return
+  }
+  clearing.value = true
+  try {
+    await novelsApi.clearTranslations(novelId.value, [chapter.id])
+    await load()
+    flash('success', `Terjemahan Bab ${chapter.chapter_number} dihapus.`)
+  } catch (err) {
+    flash('error', `Gagal menghapus terjemahan: ${err.message}`)
+  } finally {
+    clearing.value = false
   }
 }
 
@@ -926,9 +1047,31 @@ onBeforeUnmount(stopStream)
           >
             Translate Terpilih ({{ translatableSelected.length }})
           </button>
+          <button
+            class="btn-danger"
+            :disabled="!clearableSelected.length || jobActive || clearing"
+            title="Hapus hasil terjemahan bab terpilih tanpa menghapus teks raw"
+            @click="clearSelectedTranslations"
+          >
+            Hapus Terjemahan ({{ clearableSelected.length }})
+          </button>
           <button class="btn-ghost" :disabled="jobActive" @click="startAnalyze">
             Analisa Cerita (AI)
           </button>
+
+          <label
+            class="flex cursor-pointer select-none items-center gap-1.5 rounded-lg border border-ink-700 bg-ink-850 px-2.5 py-1.5 text-[11px] text-slate-300"
+            for="auto-update-reference"
+            title="Deteksi karakter, lokasi & istilah baru otomatis sebelum menerjemahkan tiap bab memakai model Analisa Cerita"
+          >
+            <input
+              id="auto-update-reference"
+              v-model="autoUpdateReference"
+              type="checkbox"
+              class="h-3.5 w-3.5 accent-indigo-500"
+            />
+            Auto-update referensi
+          </label>
 
           <span class="mx-1 h-5 w-px self-center bg-ink-700" />
 
@@ -1081,6 +1224,19 @@ onBeforeUnmount(stopStream)
                   </button>
                   <button class="btn-ghost !px-2 !py-0.5 text-[11px]" @click="openChapter(chapter)">
                     Lihat/Edit
+                  </button>
+                  <button
+                    v-if="
+                      chapter.status === 'translated' ||
+                      chapter.status === 'error' ||
+                      (chapter.translated_content || '').trim()
+                    "
+                    class="btn-ghost ml-1 !px-2 !py-0.5 text-[11px] text-amber-300 hover:text-amber-200"
+                    :disabled="jobActive || clearing"
+                    title="Hapus hasil terjemahan bab ini tanpa menghapus teks raw"
+                    @click="clearSingleTranslation(chapter)"
+                  >
+                    Reset TL
                   </button>
                   <button
                     class="btn-danger ml-1 !px-2 !py-0.5 text-[11px]"
@@ -1453,6 +1609,68 @@ onBeforeUnmount(stopStream)
           </button>
         </div>
       </form>
+    </div>
+
+    <!-- Modal: Peringatan bab sebelumnya belum diterjemahkan -->
+    <div
+      v-if="contextWarning"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm"
+      @click.self="contextWarning = null"
+    >
+      <div class="card w-full max-w-lg space-y-4 border-amber-800/70">
+        <div class="flex items-start justify-between gap-2">
+          <div>
+            <h2 class="text-base font-semibold text-amber-300">
+              Bab Sebelumnya Belum Diterjemahkan
+            </h2>
+            <p class="mt-1 text-xs text-slate-400">
+              Anda memilih mulai dari <strong>Bab {{ contextWarning.minSelectedNo }}</strong>, namun
+              masih ada <strong>{{ contextWarning.earlierCount }} bab sebelumnya</strong> yang
+              belum berstatus <code class="text-slate-300">translated</code> ({{
+                contextWarning.earlierSample
+              }}).
+            </p>
+          </div>
+          <button
+            type="button"
+            class="text-slate-500 hover:text-slate-200"
+            @click="contextWarning = null"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div class="rounded-lg border border-amber-900/60 bg-amber-950/30 p-3 text-xs leading-relaxed text-amber-200">
+          Jika langsung menerjemahkan bab ini tanpa bab sebelumnya, terjemahan
+          <strong>berisiko tidak memiliki konteks cerita sebelumnya</strong> sehingga konsistensi
+          alur, gaya bahasa, dan nama karakter bisa kurang memuaskan.
+          <span v-if="contextWarning.pendingCount" class="mt-1 block text-amber-300/90">
+            Catatan: {{ contextWarning.pendingCount }} bab sebelumnya masih berstatus
+            <code>pending_fetch</code> (belum di-fetch raw).
+          </span>
+        </div>
+
+        <div class="flex flex-wrap justify-end gap-2">
+          <button type="button" class="btn-ghost text-xs" @click="contextWarning = null">
+            Batal
+          </button>
+          <button
+            v-if="contextWarning.earlierReadyIds.length"
+            type="button"
+            class="btn-primary text-xs"
+            @click="confirmTranslateEarlier"
+          >
+            Translate Bab Sebelumnya Dulu ({{ contextWarning.earlierReadyIds.length + contextWarning.selectedIds.length }} bab)
+          </button>
+          <button
+            type="button"
+            class="rounded-lg border border-amber-700/70 bg-amber-950/50 px-3 py-1.5 text-xs font-medium text-amber-200 transition-colors hover:bg-amber-900/60"
+            @click="confirmTranslateAnyway"
+          >
+            Tetap Translate (Tanpa Konteks)
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 </template>

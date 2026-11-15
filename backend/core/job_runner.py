@@ -7,16 +7,24 @@ Jobs run as ``asyncio`` tasks inside the API process. Progress is written to
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator
 
 import database
-from core.analyzer import AnalysisError, analyze_novel, summarize_chapter_for_context
+from core.analyzer import (
+    AnalysisError,
+    analyze_novel,
+    summarize_chapter_for_context,
+    update_reference_from_chapter,
+)
 from core.app_settings import get_scraper_settings
 from core.translator import TranslationError, translate_chapter
 from scrapers.base import ScraperError
 from scrapers.registry import find_scraper, get_scraper
+
+logger = logging.getLogger(__name__)
 
 TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
 JOB_TYPES = frozenset({"story_analysis", "translate", "fetch"})
@@ -169,6 +177,7 @@ async def start_job(
     novel_id: int,
     chapter_ids: list[int] | None = None,
     db_path: str | None = None,
+    auto_update_reference: bool = True,
 ) -> dict[str, Any]:
     """Create the job row and schedule it on the running event loop."""
     if job_type not in JOB_TYPES:
@@ -192,7 +201,7 @@ async def start_job(
     state = JobState(job_id=job_id)
     _JOBS[job_id] = state
     state.task = asyncio.create_task(
-        _run(state, job_type, novel_id, chapter_ids, db_path)
+        _run(state, job_type, novel_id, chapter_ids, db_path, auto_update_reference)
     )
     return get_job(job_id) or {}
 
@@ -238,6 +247,7 @@ async def _run(
     novel_id: int,
     chapter_ids: list[int] | None,
     db_path: str | None,
+    auto_update_reference: bool = True,
 ) -> None:
     job_id = state.job_id
     try:
@@ -249,7 +259,9 @@ async def _run(
         elif job_type == "fetch":
             await _run_fetch(state, novel_id, chapter_ids, db_path)
         else:
-            await _run_translate(state, novel_id, chapter_ids, db_path)
+            await _run_translate(
+                state, novel_id, chapter_ids, db_path, auto_update_reference
+            )
 
         if state.cancelled:
             raise asyncio.CancelledError
@@ -507,11 +519,32 @@ async def _run_fetch(
         )
 
 
+def _describe_added(added: dict[str, int]) -> str:
+    parts = []
+    if added.get("characters_added"):
+        parts.append(f"+{added['characters_added']} karakter")
+    if added.get("locations_added"):
+        parts.append(f"+{added['locations_added']} lokasi")
+    if added.get("terms_added"):
+        parts.append(f"+{added['terms_added']} istilah")
+    return ", ".join(parts)
+
+
+async def _safe_update_reference(chapter_id: int, db_path: str | None) -> dict[str, int]:
+    """Auto-update is a bonus: it must never break a translation job."""
+    try:
+        return await update_reference_from_chapter(chapter_id, db_path)
+    except Exception as exc:  # noqa: BLE001 - never fatal
+        logger.warning("Auto-update referensi bab %s gagal: %s", chapter_id, exc)
+        return {"characters_added": 0, "locations_added": 0, "terms_added": 0}
+
+
 async def _run_translate(
     state: JobState,
     novel_id: int,
     chapter_ids: list[int] | None,
     db_path: str | None,
+    auto_update_reference: bool = True,
 ) -> None:
     job_id = state.job_id
     if not chapter_ids:
@@ -540,6 +573,27 @@ async def _run_translate(
             continue
 
         chapter = dict(row)
+
+        # Pick up characters/terms that first appear in this chapter *before*
+        # translating it, so they are already in this chapter's prompt.
+        if auto_update_reference:
+            added = await _safe_update_reference(chapter_id, db_path)
+            if any(added.values()):
+                _publish(
+                    job_id,
+                    {
+                        "type": "reference_update",
+                        "chapter_id": chapter_id,
+                        "chapter_number": chapter["chapter_number"],
+                        "chapter_title": chapter["title"],
+                        "added": added,
+                        "message": (
+                            f"Bab {_fmt_number(chapter['chapter_number'])}: "
+                            f"{_describe_added(added)} baru ditemukan"
+                        ),
+                    },
+                )
+
         _update_job(job_id, current_chapter_id=chapter_id)
         with database.get_conn(db_path) as conn:
             conn.execute(
@@ -574,7 +628,7 @@ async def _run_translate(
         try:
             result = await translate_chapter(chapter_id, db_path, on_progress=on_progress)
         except (TranslationError, Exception) as exc:  # noqa: BLE001
-            failures.append(f"Bab {_fmt_number(chapter['chapter_number'])}: {exc}")
+            label = _fmt_number(chapter["chapter_number"])
             with database.get_conn(db_path) as conn:
                 conn.execute(
                     "UPDATE chapters SET status = 'error', updated_at = ? WHERE id = ?",
@@ -586,12 +640,12 @@ async def _run_translate(
                     "type": "chapter_error",
                     "chapter_id": chapter_id,
                     "chapter_number": chapter["chapter_number"],
-                    "message": f"Bab {_fmt_number(chapter['chapter_number'])} gagal: {exc}",
+                    "message": f"Bab {label} gagal: {exc}",
                 },
             )
-            completed += 1
-            _update_job(job_id, completed_items=completed)
-            continue
+            raise JobError(
+                f"Batch dihentikan di Bab {label} agar bab berikutnya tidak kehilangan konteks: {exc}"
+            ) from exc
 
         completed += 1
         _update_job(job_id, completed_items=completed)

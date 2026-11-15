@@ -786,6 +786,31 @@ async def start_fetch_job(novel_id: int, payload: FetchJobRequest) -> dict[str, 
     return job
 
 
+@router.post("/novels/{novel_id}/chapters/clear-translation")
+def clear_chapter_translations(novel_id: int, req: FetchRequest) -> dict:
+    """Clear translated content, translated title, and quality score while keeping raw content."""
+    chapter_ids = [int(cid) for cid in (req.chapter_ids or [])]
+    if not chapter_ids:
+        raise HTTPException(status_code=422, detail="chapter_ids cannot be empty")
+    with database.get_conn() as conn:
+        _get_novel(conn, novel_id)
+        placeholders = ",".join("?" for _ in chapter_ids)
+        cur = conn.execute(
+            f"""
+            UPDATE chapters
+            SET translated_content = '',
+                title_translated = '',
+                quality_score = NULL,
+                status = CASE WHEN TRIM(raw_content) <> '' THEN 'raw' ELSE 'pending_fetch' END,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE novel_id = ? AND id IN ({placeholders})
+            """,
+            (novel_id, *chapter_ids),
+        )
+        conn.commit()
+    return {"ok": True, "cleared": cur.rowcount}
+
+
 @router.get("/chapters/{chapter_id}", response_model=ChapterOut)
 def get_chapter(chapter_id: int) -> ChapterOut:
     with database.get_conn() as conn:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from typing import Any
 
@@ -16,6 +17,8 @@ from core.reference import (
 from llm.base import LLMError, TaskNotConfiguredError, TaskRouter
 
 TASK_NAME = "story_analysis"
+
+logger = logging.getLogger(__name__)
 
 ANALYSIS_SYSTEM_PROMPT = (
     "You are a literary analyst preparing a translation reference sheet for a "
@@ -51,6 +54,36 @@ Rules:
 {chapters}
 """
 
+NEW_ENTITIES_PROMPT = """A translator already has the reference sheet below. Read the
+following chapter and extract ONLY what is new in it.
+
+Return JSON with exactly these keys:
+{{
+  "characters": [
+    {{"name": "source-script name", "romanized_name": "pinyin/romaji reading",
+      "age": "", "gender": "", "aliases": ["..."],
+      "relationships": "short description", "notes": "short description"}}
+  ],
+  "locations": [{{"source": "source-script place", "target": "translated place", "note": ""}}],
+  "terms": [{{"source": "source-script term", "target": "translated term", "note": "why"}}]
+}}
+
+Rules:
+- Return ONLY entries that are not in the existing reference yet, plus aliases or
+  relationships of a character that is already listed but lacks them.
+- Never repeat an existing `name` or `source`. If an entry only needs a new alias or
+  relationship, return that same `name`/`source` with just the missing field filled.
+- Do not rename, re-translate or contradict anything already in the reference.
+- Return empty lists when the chapter adds nothing. Never invent facts.
+- Keep every string short.
+
+[EXISTING REFERENCE]
+{existing}
+
+[CHAPTER — Chapter {number}: {title}]
+{text}
+"""
+
 SUMMARY_SYSTEM_PROMPT = (
     "You summarise novel chapters for a translator's rolling context. "
     "Answer with the summary only, no preamble."
@@ -76,21 +109,35 @@ class AnalysisError(RuntimeError):
 
 def _parse_json(text: str) -> dict[str, Any] | None:
     candidate = (text or "").strip()
-    if candidate.startswith("```"):
+    if not candidate:
+        return None
+    # Strip reasoning blocks that thinking models sometimes emit before JSON.
+    candidate = re.sub(r"<think>.*?</think>", "", candidate, flags=re.DOTALL | re.IGNORECASE).strip()
+    fence = re.search(r"```(?:json)?\s*(\{.*\})\s*```", candidate, re.DOTALL | re.IGNORECASE)
+    if fence:
+        candidate = fence.group(1).strip()
+    elif candidate.startswith("```"):
         candidate = re.sub(r"^```[a-zA-Z]*\s*", "", candidate)
-        candidate = re.sub(r"\s*```$", "", candidate)
-    try:
-        parsed = json.loads(candidate)
-        return parsed if isinstance(parsed, dict) else None
-    except json.JSONDecodeError:
-        match = re.search(r"\{.*\}", candidate, re.DOTALL)
-        if not match:
-            return None
+        candidate = re.sub(r"\s*```$", "", candidate).strip()
+
+    for attempt in (candidate,):
         try:
-            parsed = json.loads(match.group(0))
+            parsed = json.loads(attempt)
             return parsed if isinstance(parsed, dict) else None
         except json.JSONDecodeError:
-            return None
+            pass
+
+    match = re.search(r"\{.*\}", candidate, re.DOTALL)
+    if not match:
+        return None
+    raw_obj = match.group(0)
+    for attempt in (raw_obj, re.sub(r",\s*([}\]])", r"\1", raw_obj)):
+        try:
+            parsed = json.loads(attempt)
+            return parsed if isinstance(parsed, dict) else None
+        except json.JSONDecodeError:
+            continue
+    return None
 
 
 def _as_entries(value: Any) -> list[dict[str, Any]]:
@@ -181,7 +228,21 @@ async def analyze_novel(
 
     parsed = _parse_json(response.text)
     if parsed is None:
-        raise AnalysisError("Model tidak mengembalikan JSON yang valid untuk analisa cerita.")
+        raw_preview = re.sub(r"\s+", " ", (response.text or "").strip())[:180]
+        logger.warning(
+            "analyze_novel invalid JSON from model %s: %r",
+            resolved.model,
+            (response.text or "")[:500],
+        )
+        if not raw_preview:
+            raise AnalysisError(
+                f"Model ({resolved.model}) mengembalikan respons kosong untuk analisa cerita. "
+                "Coba naikkan Max Tokens di Settings atau ganti model."
+            )
+        raise AnalysisError(
+            f"Model ({resolved.model}) tidak mengembalikan JSON yang valid untuk analisa cerita: "
+            f"{raw_preview}"
+        )
 
     incoming = {
         "characters": _as_entries(parsed.get("characters")),
@@ -211,6 +272,92 @@ async def analyze_novel(
             "terms": len(saved.get("terms") or []),
         },
     }
+
+
+async def update_reference_from_chapter(
+    chapter_id: int,
+    db_path: str | None = None,
+    max_input_chars: int = 8000,
+) -> dict[str, int]:
+    """Extract only the *new* entities a single chapter introduces.
+
+    Called from the translation pipeline before a chapter is translated, so the
+    characters/terms that first appear in that chapter are already in the prompt
+    used to translate it. Never raises: a missing task, a provider error or bad
+    JSON all degrade to "nothing new found".
+    """
+    counts = {"characters_added": 0, "locations_added": 0, "terms_added": 0}
+
+    with database.get_conn(db_path) as conn:
+        row = conn.execute("SELECT * FROM chapters WHERE id = ?", (chapter_id,)).fetchone()
+    if row is None:
+        return counts
+
+    chapter = dict(row)
+    text = (chapter.get("raw_content") or "").strip()
+    if not text:
+        return counts
+
+    try:
+        resolved = TaskRouter(TASK_NAME, db_path=db_path).resolve()
+    except TaskNotConfiguredError:
+        # Auto-update is a bonus; translation must still run.
+        return counts
+
+    existing = load_reference(chapter["novel_id"], db_path)
+    existing_payload = {
+        "characters": existing.get("characters") or [],
+        "locations": existing.get("locations") or [],
+        "terms": existing.get("terms") or [],
+    }
+
+    prompt = NEW_ENTITIES_PROMPT.format(
+        existing=json.dumps(existing_payload, ensure_ascii=False)[:4000],
+        number=chapter.get("chapter_number"),
+        title=chapter.get("title") or "",
+        text=text[:max_input_chars],
+    )
+
+    try:
+        response = await resolved.provider.generate(
+            prompt=prompt,
+            system_prompt=ANALYSIS_SYSTEM_PROMPT,
+            model=resolved.model,
+            temperature=min(resolved.temperature, 0.3),
+            max_tokens=min(resolved.max_tokens, 2000),
+        )
+    except LLMError as exc:
+        logger.warning(
+            "Auto-update referensi bab %s dilewati (LLM error): %s", chapter_id, exc
+        )
+        return counts
+
+    parsed = _parse_json(response.text)
+    if parsed is None:
+        logger.warning(
+            "Auto-update referensi bab %s dilewati: model tidak mengembalikan JSON valid",
+            chapter_id,
+        )
+        return counts
+
+    incoming = {
+        "characters": _as_entries(parsed.get("characters")),
+        "locations": _as_entries(parsed.get("locations")),
+        "terms": _as_entries(parsed.get("terms")),
+        # The guide is written by the full analysis pass, not per chapter.
+        "translation_guide": "",
+    }
+
+    merged = merge_reference(existing, incoming)
+    for field in ("characters", "locations", "terms"):
+        counts[f"{field}_added"] = max(
+            0, len(merged.get(field) or []) - len(existing.get(field) or [])
+        )
+
+    if any(counts.values()):
+        save_reference(chapter["novel_id"], merged, db_path)
+
+    return counts
 
 
 async def summarize_chapter_for_context(

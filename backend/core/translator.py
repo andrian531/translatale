@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import re
 from typing import Any, Awaitable, Callable
@@ -15,6 +16,8 @@ TASK_NAME = "translate"
 
 CHUNK_MAX_CHARS = 3000
 ROLLING_CONTEXT_CHARS = 300
+CHUNK_MAX_RETRIES = 3
+CHUNK_RETRY_DELAY = 1.0
 
 LANG_NAMES = {
     "zh": "Chinese",
@@ -176,7 +179,7 @@ async def translate_chapter(
                 system_prompt=system_prompt,
                 model=resolved.model,
                 temperature=min(resolved.temperature, 0.3),
-                max_tokens=200,
+                max_tokens=800,
             )
             title_translated = re.sub(r"\s+", " ", title_response.text or "").strip()[:300]
         except LLMError:
@@ -202,20 +205,41 @@ async def translate_chapter(
             rolling=rolling or "(start of chapter)",
             text=chunk,
         )
-        try:
-            response = await resolved.provider.generate(
-                prompt=prompt,
-                system_prompt=system_prompt,
-                model=resolved.model,
-                temperature=resolved.temperature,
-                max_tokens=resolved.max_tokens,
-            )
-        except LLMError as exc:
-            raise TranslationError(f"Chunk {index}/{len(chunks)} gagal: {exc}") from exc
+        text = ""
+        last_error: LLMError | None = None
+        for attempt in range(CHUNK_MAX_RETRIES + 1):
+            try:
+                response = await resolved.provider.generate(
+                    prompt=prompt,
+                    system_prompt=system_prompt,
+                    model=resolved.model,
+                    temperature=resolved.temperature,
+                    max_tokens=resolved.max_tokens,
+                )
+            except LLMError as exc:
+                last_error = exc
+                if attempt < CHUNK_MAX_RETRIES:
+                    await asyncio.sleep(CHUNK_RETRY_DELAY)
+                    continue
+                raise TranslationError(
+                    f"Chunk {index}/{len(chunks)} gagal setelah {CHUNK_MAX_RETRIES}x retry: {exc}"
+                ) from exc
 
-        text = (response.text or "").strip()
+            text = (response.text or "").strip()
+            if text:
+                break
+            if attempt < CHUNK_MAX_RETRIES:
+                await asyncio.sleep(CHUNK_RETRY_DELAY)
+
         if not text:
-            raise TranslationError(f"Chunk {index}/{len(chunks)} kosong dari model")
+            if last_error is not None:
+                raise TranslationError(
+                    f"Chunk {index}/{len(chunks)} gagal setelah {CHUNK_MAX_RETRIES}x retry: {last_error}"
+                )
+            raise TranslationError(
+                f"Chunk {index}/{len(chunks)} kosong dari model ({resolved.model}) "
+                f"setelah {CHUNK_MAX_RETRIES}x retry. Coba naikkan Max Tokens di Settings."
+            )
         translated_chunks.append(text)
         rolling = _tail(text)
 

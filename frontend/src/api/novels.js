@@ -39,6 +39,11 @@ export const novelsApi = {
       body: JSON.stringify({ chapter_ids: chapterIds, limit }),
     }),
   refineSynopsis: (id) => request(`/novels/${id}/synopsis/refine`, { method: 'POST' }),
+  clearTranslations: (id, chapterIds) =>
+    request(`/novels/${id}/chapters/clear-translation`, {
+      method: 'POST',
+      body: JSON.stringify({ chapter_ids: chapterIds }),
+    }),
   uploadChapters: (id, files) => {
     const form = new FormData()
     for (const file of files) form.append('files', file)

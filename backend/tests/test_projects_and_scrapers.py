@@ -431,3 +431,81 @@ def test_analyze_uses_configured_task_model(client, monkeypatch):
     assert body["model"] == "deepseek-chat"
     assert body["analysis"]["chapter_content_selector"] == ".txtnav"
     assert captured["model"] == "deepseek-chat"
+
+
+def test_clear_chapter_translations_preserves_raw_and_resets_status(client):
+    novel_a = client.post("/api/novels", json={"title": "Novel A"}).json()
+    novel_b = client.post("/api/novels", json={"title": "Novel B"}).json()
+
+    ch_raw = client.post(
+        f"/api/novels/{novel_a['id']}/chapters/manual",
+        json={"chapter_number": 1, "title": "Bab 1", "raw_content": "Isi mentah bab 1"},
+    ).json()
+    ch_empty = client.post(
+        f"/api/novels/{novel_a['id']}/chapters/manual",
+        json={"chapter_number": 2, "title": "Bab 2", "raw_content": "sementara"},
+    ).json()
+    ch_other = client.post(
+        f"/api/novels/{novel_b['id']}/chapters/manual",
+        json={"chapter_number": 1, "title": "Other 1", "raw_content": "Other raw"},
+    ).json()
+
+    # Mark them as translated / error with translated fields populated.
+    client.patch(
+        f"/api/chapters/{ch_raw['id']}",
+        json={
+            "title_translated": "Bab 1 TL",
+            "translated_content": "Hasil terjemahan 1",
+            "status": "translated",
+            "quality_score": 95.0,
+        },
+    )
+    client.patch(
+        f"/api/chapters/{ch_empty['id']}",
+        json={
+            "raw_content": "",
+            "title_translated": "Bab 2 TL",
+            "translated_content": "Sisa error",
+            "status": "error",
+        },
+    )
+    client.patch(
+        f"/api/chapters/{ch_other['id']}",
+        json={
+            "title_translated": "Other TL",
+            "translated_content": "Harus tetap ada",
+            "status": "translated",
+        },
+    )
+
+    resp = client.post(
+        f"/api/novels/{novel_a['id']}/chapters/clear-translation",
+        json={"chapter_ids": [ch_raw["id"], ch_empty["id"], ch_other["id"]]},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"ok": True, "cleared": 2}
+
+    updated_raw = client.get(f"/api/chapters/{ch_raw['id']}").json()
+    assert updated_raw["raw_content"] == "Isi mentah bab 1"
+    assert updated_raw["translated_content"] == ""
+    assert updated_raw["title_translated"] == ""
+    assert updated_raw["quality_score"] is None
+    assert updated_raw["status"] == "raw"
+
+    updated_empty = client.get(f"/api/chapters/{ch_empty['id']}").json()
+    assert updated_empty["translated_content"] == ""
+    assert updated_empty["title_translated"] == ""
+    assert updated_empty["status"] == "pending_fetch"
+
+    untouched_other = client.get(f"/api/chapters/{ch_other['id']}").json()
+    assert untouched_other["translated_content"] == "Harus tetap ada"
+    assert untouched_other["status"] == "translated"
+
+
+def test_clear_chapter_translations_rejects_empty_list(client):
+    novel = client.post("/api/novels", json={"title": "Novel Empty"}).json()
+    resp = client.post(
+        f"/api/novels/{novel['id']}/chapters/clear-translation",
+        json={"chapter_ids": []},
+    )
+    assert resp.status_code == 422

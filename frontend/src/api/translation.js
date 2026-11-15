@@ -13,10 +13,13 @@ export const translationApi = {
       method: 'POST',
       body: JSON.stringify({ chapter_ids: chapterIds?.length ? chapterIds : null }),
     }),
-  startTranslate: (novelId, chapterIds) =>
+  startTranslate: (novelId, chapterIds, autoUpdateReference = true) =>
     request(`/novels/${novelId}/translate`, {
       method: 'POST',
-      body: JSON.stringify({ chapter_ids: chapterIds }),
+      body: JSON.stringify({
+        chapter_ids: chapterIds,
+        auto_update_reference: autoUpdateReference,
+      }),
     }),
 
   getJob: (jobId) => request(`/jobs/${jobId}`),

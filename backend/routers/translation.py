@@ -50,6 +50,7 @@ class AnalyzePayload(BaseModel):
 
 class TranslatePayload(BaseModel):
     chapter_ids: list[int] = Field(default_factory=list)
+    auto_update_reference: bool = True
 
 
 # --------------------------------------------------------------------------
@@ -147,7 +148,12 @@ async def start_translation(novel_id: int, payload: TranslatePayload) -> dict[st
             detail=f"Bab {empty} belum punya isi raw. Fetch atau paste isinya dulu.",
         )
 
-    job = await job_runner.start_job("translate", novel_id, payload.chapter_ids)
+    job = await job_runner.start_job(
+        "translate",
+        novel_id,
+        payload.chapter_ids,
+        auto_update_reference=payload.auto_update_reference,
+    )
     return job
 
 
