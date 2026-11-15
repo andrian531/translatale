@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { settingsApi } from '@/api/settings'
+import ModelSelect from '@/components/ModelSelect.vue'
 
 const meta = ref({ provider_types: [], tasks: [] })
 const providers = ref([])
@@ -17,15 +18,20 @@ const form = reactive({
   api_key: '',
   base_url: '',
   is_enabled: true,
+  //: Free-text model list: one per line or comma separated.
+  modelsText: '',
 })
 
 const savingProvider = ref(false)
 const deletingId = ref(null)
 const testingId = ref(null)
+const syncingId = ref(null)
 const testResults = reactive({})
+const syncResults = reactive({})
 
 const taskDrafts = reactive({})
 const savingTask = ref(null)
+const taskSyncing = ref(null)
 const taskSaved = reactive({})
 
 const providerTypes = computed(() => meta.value.provider_types ?? [])
@@ -35,6 +41,54 @@ const currentType = computed(() =>
 const isEditing = computed(() => form.id !== null)
 const keyRequired = computed(() => currentType.value?.requires_api_key !== false)
 const hasProviders = computed(() => providers.value.length > 0)
+const isCustom = computed(() => form.provider_type === 'custom')
+//: A Custom provider must be named by the user, otherwise several of them
+//: collapse into the same generic label in the routing dropdowns.
+const nameMissing = computed(() => isCustom.value && !form.display_name.trim())
+const canSaveProvider = computed(() => !savingProvider.value && !nameMissing.value)
+
+function parseModelText(text) {
+  return [
+    ...new Set(
+      String(text || '')
+        .split(/[\n,]/)
+        .map((item) => item.trim())
+        .filter(Boolean),
+    ),
+  ]
+}
+
+function providerById(id) {
+  return providers.value.find((item) => item.id === id) ?? null
+}
+
+//: Short type names keep the routing dropdown readable
+//: ("Kenari (Custom · kenari.id)").
+const SHORT_TYPE_LABELS = {
+  gemini: 'Gemini',
+  openai: 'OpenAI',
+  openrouter: 'OpenRouter',
+  deepseek: 'DeepSeek',
+  anthropic: 'Anthropic',
+  custom: 'Custom',
+  ollama: 'Ollama',
+}
+
+function providerOptionLabel(provider) {
+  const type = SHORT_TYPE_LABELS[provider.provider_type] ?? providerLabel(provider.provider_type)
+  let host = ''
+  try {
+    host = new URL(provider.base_url).host
+  } catch {
+    host = ''
+  }
+  return host ? `${provider.display_name} (${type} · ${host})` : `${provider.display_name} (${type})`
+}
+
+function modelsForTask(task) {
+  const draft = taskDrafts[task.task_name]
+  return providerById(draft?.provider_id)?.available_models ?? []
+}
 
 function providerLabel(type) {
   return providerTypes.value.find((item) => item.value === type)?.label ?? type
@@ -51,7 +105,10 @@ function applyTypeDefaults() {
   const type = currentType.value
   if (!type) return
   form.base_url = type.default_base_url ?? ''
-  if (!form.display_name) form.display_name = type.label
+  // Custom providers stay unnamed: the user must give each one a distinct name.
+  if (form.provider_type !== 'custom' && !form.display_name) {
+    form.display_name = type.label
+  }
 }
 
 function resetForm() {
@@ -61,6 +118,7 @@ function resetForm() {
   form.api_key = ''
   form.base_url = ''
   form.is_enabled = true
+  form.modelsText = ''
   applyTypeDefaults()
 }
 
@@ -68,6 +126,13 @@ function onTypeChange() {
   const type = currentType.value
   if (!type) return
   form.base_url = type.default_base_url ?? ''
+  if (form.provider_type === 'custom') {
+    // Drop the generic label a previous type may have filled in.
+    if (providerTypes.value.some((t) => t.value !== 'custom' && t.label === form.display_name)) {
+      form.display_name = ''
+    }
+    return
+  }
   if (!form.display_name || providerTypes.value.some((t) => t.label === form.display_name)) {
     form.display_name = type.label
   }
@@ -80,6 +145,7 @@ function editProvider(provider) {
   form.api_key = ''
   form.base_url = provider.base_url
   form.is_enabled = provider.is_enabled
+  form.modelsText = (provider.available_models ?? []).join('\n')
   window.scrollTo({ top: 0, behavior: 'smooth' })
 }
 
@@ -116,13 +182,18 @@ async function loadAll() {
 }
 
 async function saveProvider() {
+  if (nameMissing.value) {
+    flash('error', 'Nama provider wajib diisi untuk tipe Custom (mis. Kenari, Groq, Together).')
+    return
+  }
   savingProvider.value = true
   try {
     const payload = {
       provider_type: form.provider_type,
-      display_name: form.display_name || providerLabel(form.provider_type),
+      display_name: form.display_name.trim() || providerLabel(form.provider_type),
       base_url: form.base_url,
       is_enabled: form.is_enabled,
+      available_models: parseModelText(form.modelsText),
     }
     if (form.id !== null) payload.id = form.id
     // Empty key on edit = keep the stored one (backend enforces this too).
@@ -161,10 +232,32 @@ async function testProvider(provider) {
   try {
     const result = await settingsApi.testProvider(provider.id)
     testResults[provider.id] = result
+    // The backend syncs the model list opportunistically on a successful test.
+    if (result.models_synced) await loadProviders()
   } catch (error) {
     testResults[provider.id] = { ok: false, message: error.message }
   } finally {
     testingId.value = null
+  }
+}
+
+async function syncModels(provider) {
+  syncingId.value = provider.id
+  syncResults[provider.id] = null
+  try {
+    const result = await settingsApi.syncProviderModels(provider.id)
+    await loadProviders()
+    syncResults[provider.id] = {
+      ok: true,
+      text: `${result.count} model diambil dari provider.`,
+    }
+    if (form.id === provider.id) form.modelsText = (result.models ?? []).join('\n')
+    flash('success', `${provider.display_name}: ${result.count} model tersimpan.`)
+  } catch (error) {
+    syncResults[provider.id] = { ok: false, text: error.message }
+    flash('error', `Gagal mengambil daftar model: ${error.message}`)
+  } finally {
+    syncingId.value = null
   }
 }
 
@@ -189,6 +282,21 @@ async function saveTask(task) {
     flash('error', `Gagal menyimpan routing ${task.label}: ${error.message}`)
   } finally {
     savingTask.value = null
+  }
+}
+
+async function syncForTask(task) {
+  const provider = providerById(taskDrafts[task.task_name]?.provider_id)
+  if (!provider) return
+  taskSyncing.value = task.task_name
+  try {
+    const result = await settingsApi.syncProviderModels(provider.id)
+    await loadProviders()
+    flash('success', `${provider.display_name}: ${result.count} model tersimpan.`)
+  } catch (error) {
+    flash('error', `Gagal mengambil daftar model: ${error.message}`)
+  } finally {
+    taskSyncing.value = null
   }
 }
 
@@ -266,14 +374,29 @@ onMounted(loadAll)
             </div>
 
             <div>
-              <label class="label" for="display-name">Display name</label>
+              <label class="label" for="display-name">
+                Nama Provider
+                <span v-if="isCustom" class="normal-case text-rose-400">(wajib)</span>
+              </label>
               <input
                 id="display-name"
                 v-model="form.display_name"
                 class="input"
                 type="text"
-                :placeholder="currentType?.label ?? 'Nama provider'"
+                :class="{ '!border-rose-700': nameMissing }"
+                :placeholder="
+                  isCustom
+                    ? 'Contoh: Kenari, Groq, DeepSeek'
+                    : (currentType?.label ?? 'Nama provider')
+                "
               />
+              <p v-if="nameMissing" class="mt-1 text-[11px] text-rose-400">
+                Beri nama unik agar beberapa provider Custom tetap bisa dibedakan di dropdown
+                routing.
+              </p>
+              <p v-else-if="isCustom" class="mt-1 text-[11px] text-slate-500">
+                Tipe Custom bisa dipakai berkali-kali — namai sesuai penyedianya.
+              </p>
             </div>
 
             <div>
@@ -311,6 +434,23 @@ onMounted(loadAll)
               </p>
             </div>
 
+            <div>
+              <label class="label" for="models-text">Daftar Model Tersimpan</label>
+              <textarea
+                id="models-text"
+                v-model="form.modelsText"
+                class="input h-24 resize-y font-mono text-xs"
+                placeholder="Satu model per baris, mis.&#10;gpt-4o-mini&#10;gpt-4o"
+              />
+              <p class="mt-1 text-[11px] text-slate-500">
+                Opsional — isi manual (pisahkan baris atau koma) atau ambil otomatis lewat tombol
+                <span class="text-slate-400">Ambil Daftar Model</span> pada kartu provider.
+                <span v-if="parseModelText(form.modelsText).length" class="text-slate-400">
+                  ({{ parseModelText(form.modelsText).length }} model)
+                </span>
+              </p>
+            </div>
+
             <label class="flex items-center gap-2 text-sm text-slate-300">
               <input
                 v-model="form.is_enabled"
@@ -320,7 +460,7 @@ onMounted(loadAll)
               Aktif (bisa dipakai untuk routing)
             </label>
 
-            <button type="submit" class="btn-primary w-full" :disabled="savingProvider">
+            <button type="submit" class="btn-primary w-full" :disabled="!canSaveProvider">
               {{ savingProvider ? 'Menyimpan…' : isEditing ? 'Update provider' : 'Tambah provider' }}
             </button>
           </form>
@@ -350,6 +490,16 @@ onMounted(loadAll)
                       {{ providerLabel(provider.provider_type) }}
                     </span>
                     <span
+                      class="badge"
+                      :class="
+                        (provider.available_models ?? []).length
+                          ? 'bg-sky-950/60 text-sky-400'
+                          : 'bg-ink-850 text-slate-500'
+                      "
+                    >
+                      {{ (provider.available_models ?? []).length }} model
+                    </span>
+                    <span
                       v-if="!provider.is_enabled"
                       class="badge bg-amber-950/60 text-amber-400"
                       >nonaktif</span
@@ -359,7 +509,14 @@ onMounted(loadAll)
                     {{ provider.base_url || '—' }}
                   </p>
                 </div>
-                <div class="flex items-center gap-2">
+                <div class="flex flex-wrap items-center gap-2">
+                  <button
+                    class="btn-ghost !px-2.5 !py-1 text-xs"
+                    :disabled="syncingId === provider.id"
+                    @click="syncModels(provider)"
+                  >
+                    {{ syncingId === provider.id ? 'Mengambil…' : 'Ambil Daftar Model' }}
+                  </button>
                   <button
                     class="btn-ghost !px-2.5 !py-1 text-xs"
                     :disabled="testingId === provider.id"
@@ -389,6 +546,18 @@ onMounted(loadAll)
                   {{ provider.api_key || 'belum diisi' }}
                 </code>
               </div>
+
+              <p
+                v-if="syncResults[provider.id]"
+                class="rounded-lg border px-3 py-2 text-xs"
+                :class="
+                  syncResults[provider.id].ok
+                    ? 'border-sky-900/60 bg-sky-950/30 text-sky-300'
+                    : 'border-rose-900/60 bg-rose-950/30 text-rose-300'
+                "
+              >
+                {{ syncResults[provider.id].text }}
+              </p>
 
               <p
                 v-if="testResults[provider.id]"
@@ -442,21 +611,41 @@ onMounted(loadAll)
               >
                 <option :value="null">— belum dipilih —</option>
                 <option v-for="provider in providers" :key="provider.id" :value="provider.id">
-                  {{ provider.display_name }}
+                  {{ providerOptionLabel(provider) }}
                   <template v-if="!provider.is_enabled"> (nonaktif)</template>
                 </option>
               </select>
             </div>
 
             <div>
-              <label class="label" :for="`model-${task.task_name}`">Model</label>
-              <input
-                :id="`model-${task.task_name}`"
+              <label class="label">Model</label>
+              <ModelSelect
                 v-model="taskDrafts[task.task_name].model_name"
-                class="input font-mono text-xs"
-                type="text"
-                placeholder="mis. gemini-2.0-flash"
+                :models="modelsForTask(task)"
+                :disabled="!taskDrafts[task.task_name].provider_id"
+                placeholder="Pilih atau ketik nama model"
+                :empty-hint="
+                  taskDrafts[task.task_name].provider_id
+                    ? 'Belum ada model tersimpan untuk provider ini. Klik Sync Model, atau ketik nama model manual.'
+                    : 'Pilih provider dulu.'
+                "
               />
+              <div class="mt-2 flex items-center gap-2">
+                <button
+                  type="button"
+                  class="btn-ghost !px-2.5 !py-1 text-[11px]"
+                  :disabled="
+                    !taskDrafts[task.task_name].provider_id ||
+                    taskSyncing === task.task_name
+                  "
+                  @click="syncForTask(task)"
+                >
+                  {{ taskSyncing === task.task_name ? 'Mengambil…' : 'Sync Model' }}
+                </button>
+                <span class="text-[11px] text-slate-500">
+                  {{ modelsForTask(task).length }} model tersimpan
+                </span>
+              </div>
             </div>
 
             <div class="grid grid-cols-2 gap-3">

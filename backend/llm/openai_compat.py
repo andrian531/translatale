@@ -6,6 +6,7 @@ Ollama (which exposes ``/v1/chat/completions`` locally and needs no API key).
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import httpx
@@ -159,3 +160,58 @@ class OpenAICompatibleProvider(BaseLLMProvider):
             "model": model_name,
             "models": available[:50],
         }
+
+    async def list_models(self) -> list[str]:
+        """Enumerate model IDs (Ollama uses its native ``/api/tags``)."""
+        if self.provider_type == "ollama":
+            models = await self._ollama_tags()
+            if models:
+                return models
+
+        self._require_key()
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.get(self.url("models"), headers=self._headers())
+        except httpx.HTTPError as exc:
+            raise LLMError(
+                f"{self.provider_type}: gagal mengambil daftar model ({exc})"
+            ) from exc
+
+        if response.status_code >= 400:
+            raise LLMError(f"{self.provider_type}: {self._error_message(response)}")
+
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise LLMError(
+                f"{self.provider_type}: respons daftar model bukan JSON"
+            ) from exc
+
+        ids = [
+            str(item["id"])
+            for item in payload.get("data") or []
+            if isinstance(item, dict) and item.get("id")
+        ]
+        return sorted(set(ids))
+
+    async def _ollama_tags(self) -> list[str]:
+        """Ollama lists installed models at ``/api/tags`` (outside ``/v1``)."""
+        root = re.sub(r"/v\d+/?$", "", self.base_url.rstrip("/"))
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.get(f"{root}/api/tags")
+        except httpx.HTTPError:
+            return []
+        if response.status_code >= 400:
+            return []
+        try:
+            payload = response.json()
+        except ValueError:
+            return []
+        return sorted(
+            {
+                str(item["name"])
+                for item in payload.get("models") or []
+                if isinstance(item, dict) and item.get("name")
+            }
+        )

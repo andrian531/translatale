@@ -11,6 +11,15 @@ from llm.base import BaseLLMProvider, LLMError, LLMResponse
 
 ANTHROPIC_VERSION = "2023-06-01"
 
+#: Used when the account cannot list models (proxy, older API key, offline).
+FALLBACK_MODELS = (
+    "claude-sonnet-4-5-20250929",
+    "claude-opus-4-1-20250805",
+    "claude-3-7-sonnet-latest",
+    "claude-3-5-sonnet-latest",
+    "claude-3-5-haiku-latest",
+)
+
 
 class AnthropicProvider(BaseLLMProvider):
     provider_type = "anthropic"
@@ -127,3 +136,28 @@ class AnthropicProvider(BaseLLMProvider):
             "model": model_name,
             "models": available[:50],
         }
+
+    async def list_models(self) -> list[str]:
+        """List Claude models, falling back to the known line-up on failure."""
+        if not self.api_key:
+            return list(FALLBACK_MODELS)
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.get(self.url("models"), headers=self._headers())
+        except httpx.HTTPError:
+            return list(FALLBACK_MODELS)
+
+        if response.status_code >= 400:
+            return list(FALLBACK_MODELS)
+
+        try:
+            payload = response.json()
+        except ValueError:
+            return list(FALLBACK_MODELS)
+
+        models = [
+            str(item["id"])
+            for item in payload.get("data") or []
+            if isinstance(item, dict) and item.get("id")
+        ]
+        return sorted(set(models)) or list(FALLBACK_MODELS)

@@ -109,3 +109,35 @@ class GeminiProvider(BaseLLMProvider):
             "message": f"Connected. Model '{model_name}' is reachable.",
             "model": model_name,
         }
+
+    async def list_models(self) -> list[str]:
+        """List Gemini models that can actually run ``generateContent``."""
+        self._require_key()
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.get(
+                    self.url("models"),
+                    params={"key": self.api_key, "pageSize": 200},
+                )
+        except httpx.HTTPError as exc:
+            raise LLMError(f"Gemini: gagal mengambil daftar model ({exc})") from exc
+
+        if response.status_code >= 400:
+            raise LLMError(f"Gemini: {self._error_message(response)}")
+
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise LLMError("Gemini: respons daftar model bukan JSON") from exc
+
+        models: list[str] = []
+        for item in payload.get("models") or []:
+            if not isinstance(item, dict):
+                continue
+            methods = item.get("supportedGenerationMethods") or []
+            if "generateContent" not in methods:
+                continue
+            name = str(item.get("name") or "").removeprefix("models/")
+            if name:
+                models.append(name)
+        return sorted(set(models))

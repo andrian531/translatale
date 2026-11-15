@@ -92,6 +92,14 @@ class BaseLLMProvider(ABC):
     async def test_connection(self, model: str | None = None) -> dict[str, Any]:
         """Cheap credential/model check. Returns ``{"ok": bool, "message": str}``."""
 
+    async def list_models(self) -> list[str]:
+        """Return the provider's model IDs, sorted.
+
+        Adapters that can enumerate models override this; the default raises so
+        the caller can report "not supported" instead of silently returning [].
+        """
+        raise LLMError(f"{self.provider_type}: daftar model tidak didukung")
+
 
 @dataclass
 class ResolvedTask:

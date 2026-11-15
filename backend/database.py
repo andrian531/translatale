@@ -22,7 +22,8 @@ CREATE TABLE IF NOT EXISTS provider_configs (
     api_key       TEXT    NOT NULL DEFAULT '',
     base_url      TEXT    NOT NULL DEFAULT '',
     is_enabled    INTEGER NOT NULL DEFAULT 1,
-    updated_at    TEXT    NOT NULL
+    updated_at    TEXT    NOT NULL,
+    available_models TEXT NOT NULL DEFAULT '[]'
 );
 
 CREATE TABLE IF NOT EXISTS task_models (
@@ -134,6 +135,29 @@ def get_conn(db_path: Path | str | None = None) -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
+#: Columns added after the first release. ``(table, column, definition)``.
+#: ``CREATE TABLE IF NOT EXISTS`` never touches an existing table, so older
+#: databases need an explicit ``ALTER TABLE``.
+COLUMN_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
+    ("provider_configs", "available_models", "TEXT NOT NULL DEFAULT '[]'"),
+)
+
+
+def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    return {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+
+
+def migrate_schema(conn: sqlite3.Connection) -> list[str]:
+    """Add any missing columns to an existing database (idempotent)."""
+    applied: list[str] = []
+    for table, column, definition in COLUMN_MIGRATIONS:
+        if column in _table_columns(conn, table):
+            continue
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+        applied.append(f"{table}.{column}")
+    return applied
+
+
 def init_db(db_path: Path | str | None = None) -> Path:
     """Create tables (idempotent) and seed the three routing slots."""
     path = Path(db_path) if db_path is not None else get_db_path()
@@ -141,6 +165,7 @@ def init_db(db_path: Path | str | None = None) -> Path:
 
     with get_conn(path) as conn:
         conn.executescript(SCHEMA)
+        migrate_schema(conn)
         now = utcnow()
         for task in config.TASKS:
             conn.execute(

@@ -16,6 +16,9 @@ export const settingsApi = {
   listTasks: () => request('/settings/tasks'),
   saveTask: (taskName, payload) =>
     request(`/settings/tasks/${taskName}`, { method: 'PUT', body: JSON.stringify(payload) }),
+
+  syncProviderModels: (id) =>
+    request(`/settings/providers/${id}/models/sync`, { method: 'POST' }),
 }
 
 export const healthApi = {
