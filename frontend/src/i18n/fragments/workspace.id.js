@@ -22,6 +22,13 @@ export default {
     actions: 'Aksi',
     empty: 'Tidak ada bab pada filter ini.',
     untitled: '(tanpa judul)',
+    showingRange: 'Menampilkan {start}–{end} dari {total}',
+    perPage: 'Per halaman',
+    prev: 'Sebelumnya',
+    next: 'Berikutnya',
+    pageOf: 'Halaman {page} / {total}',
+    searchPlaceholder: 'Cari nomor atau judul bab…',
+    clearSearch: 'Hapus pencarian',
   },
   tabs: {
     chapters: 'Bab',

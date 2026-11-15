@@ -112,11 +112,78 @@ function gradeFor(score) {
   return 'D'
 }
 
-const visibleChapters = computed(() =>
-  filter.value === 'all'
-    ? chapters.value
-    : chapters.value.filter((chapter) => chapter.status === filter.value),
-)
+const searchQuery = ref('')
+const sortKey = ref('chapter_number')
+const sortDir = ref('asc')
+
+function toggleSort(key) {
+  if (sortKey.value === key) {
+    sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc'
+  } else {
+    sortKey.value = key
+    sortDir.value = 'asc'
+  }
+}
+
+function sortIndicator(key) {
+  if (sortKey.value !== key) return ''
+  return sortDir.value === 'asc' ? ' ↑' : ' ↓'
+}
+
+const visibleChapters = computed(() => {
+  const q = searchQuery.value.trim().toLowerCase()
+  const filtered = chapters.value.filter((chapter) => {
+    if (filter.value !== 'all' && chapter.status !== filter.value) return false
+    if (!q) return true
+    const num = String(chapter.chapter_number ?? '')
+    const title = (chapter.title || '').toLowerCase()
+    const translated = (chapter.title_translated || '').toLowerCase()
+    return num.includes(q) || title.includes(q) || translated.includes(q)
+  })
+
+  const key = sortKey.value
+  const dir = sortDir.value === 'asc' ? 1 : -1
+  return [...filtered].sort((a, b) => {
+    if (key === 'chapter_number') return ((a.chapter_number ?? 0) - (b.chapter_number ?? 0)) * dir
+    if (key === 'title') {
+      const ta = (a.title_translated || a.title || '').toLowerCase()
+      const tb = (b.title_translated || b.title || '').toLowerCase()
+      return ta.localeCompare(tb) * dir
+    }
+    if (key === 'status') return String(a.status || '').localeCompare(String(b.status || '')) * dir
+    if (key === 'quality') {
+      const qa = a.quality_score ?? -1
+      const qb = b.quality_score ?? -1
+      return (qa - qb) * dir
+    }
+    if (key === 'chars') {
+      return ((a.raw_content?.length ?? 0) - (b.raw_content?.length ?? 0)) * dir
+    }
+    return 0
+  })
+})
+
+const pageSize = ref(50)
+const currentPage = ref(1)
+const totalPages = computed(() => Math.max(1, Math.ceil(visibleChapters.value.length / pageSize.value)))
+const paginatedChapters = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  return visibleChapters.value.slice(start, start + pageSize.value)
+})
+const pageRange = computed(() => {
+  const total = visibleChapters.value.length
+  if (!total) return { start: 0, end: 0, total: 0 }
+  const start = (currentPage.value - 1) * pageSize.value + 1
+  const end = Math.min(total, currentPage.value * pageSize.value)
+  return { start, end, total }
+})
+
+watch([filter, searchQuery, pageSize, sortKey, sortDir], () => {
+  currentPage.value = 1
+})
+watch(totalPages, (max) => {
+  if (currentPage.value > max) currentPage.value = max
+})
 
 const selectedChapters = computed(() =>
   chapters.value.filter((chapter) => selected.value.includes(chapter.id)),
@@ -142,8 +209,8 @@ const clearing = ref(false)
 
 const allVisibleSelected = computed(
   () =>
-    visibleChapters.value.length > 0 &&
-    visibleChapters.value.every((chapter) => selected.value.includes(chapter.id)),
+    paginatedChapters.value.length > 0 &&
+    paginatedChapters.value.every((chapter) => selected.value.includes(chapter.id)),
 )
 
 const displaySynopsis = computed(() => {
@@ -254,10 +321,10 @@ function toggle(id) {
 
 function toggleAll() {
   if (allVisibleSelected.value) {
-    const visibleIds = visibleChapters.value.map((chapter) => chapter.id)
+    const visibleIds = paginatedChapters.value.map((chapter) => chapter.id)
     selected.value = selected.value.filter((id) => !visibleIds.includes(id))
   } else {
-    selected.value = [...new Set([...selected.value, ...visibleChapters.value.map((c) => c.id)])]
+    selected.value = [...new Set([...selected.value, ...paginatedChapters.value.map((c) => c.id)])]
   }
 }
 
@@ -1397,27 +1464,48 @@ onBeforeUnmount(stopStream)
           />
         </div>
 
-        <div class="mb-3 flex flex-wrap gap-1">
-          <button
-            v-for="item in filters"
-            :key="item.value"
-            class="rounded-lg px-3 py-1.5 text-xs font-medium"
-            :class="
-              filter === item.value
-                ? 'bg-ink-800 text-strong'
-                : 'text-slate-400 hover:bg-ink-850 hover:text-slate-200'
-            "
-            @click="filter = item.value"
-          >
-            {{ t(item.labelKey) }}
-            <span class="text-slate-400">
-              {{
-                item.value === 'all'
-                  ? chapters.length
-                  : chapters.filter((c) => c.status === item.value).length
-              }}
-            </span>
-          </button>
+        <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div class="flex flex-wrap gap-1">
+            <button
+              v-for="item in filters"
+              :key="item.value"
+              class="rounded-lg px-3 py-1.5 text-xs font-medium"
+              :class="
+                filter === item.value
+                  ? 'bg-ink-800 text-strong'
+                  : 'text-slate-400 hover:bg-ink-850 hover:text-slate-200'
+              "
+              @click="filter = item.value"
+            >
+              {{ t(item.labelKey) }}
+              <span class="text-slate-400">
+                {{
+                  item.value === 'all'
+                    ? chapters.length
+                    : chapters.filter((c) => c.status === item.value).length
+                }}
+              </span>
+            </button>
+          </div>
+
+          <div class="relative w-full sm:w-64">
+            <input
+              v-model="searchQuery"
+              type="text"
+              class="input !py-1.5 pr-7 text-xs"
+              :placeholder="t('workspace.table.searchPlaceholder')"
+            />
+            <button
+              v-if="searchQuery"
+              type="button"
+              class="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-strong"
+              :title="t('workspace.table.clearSearch')"
+              :aria-label="t('workspace.table.clearSearch')"
+              @click="searchQuery = ''"
+            >
+              ✕
+            </button>
+          </div>
         </div>
 
         <div class="overflow-hidden rounded-xl border border-ink-700">
@@ -1432,21 +1520,52 @@ onBeforeUnmount(stopStream)
                     @change="toggleAll"
                   />
                 </th>
-                <th class="w-12 px-3 py-2">#</th>
-                <th class="px-3 py-2">{{ t('workspace.table.title') }}</th>
-                <th class="w-28 px-3 py-2">{{ t('workspace.table.status') }}</th>
-                <th class="w-24 px-3 py-2">{{ t('workspace.table.quality') }}</th>
-                <th class="w-16 px-3 py-2 text-right">{{ t('workspace.table.chars') }}</th>
-                <th class="w-36 px-3 py-2 text-right">{{ t('workspace.table.actions') }}</th>
+                <th
+                  class="w-14 cursor-pointer select-none px-3 py-2 hover:text-strong"
+                  @click="toggleSort('chapter_number')"
+                >
+                  #{{ sortIndicator('chapter_number') }}
+                </th>
+                <th
+                  class="cursor-pointer select-none px-3 py-2 hover:text-strong"
+                  @click="toggleSort('title')"
+                >
+                  {{ t('workspace.table.title') }}{{ sortIndicator('title') }}
+                </th>
+                <th
+                  class="w-28 cursor-pointer select-none px-3 py-2 hover:text-strong"
+                  @click="toggleSort('status')"
+                >
+                  {{ t('workspace.table.status') }}{{ sortIndicator('status') }}
+                </th>
+                <th
+                  class="w-24 cursor-pointer select-none px-3 py-2 hover:text-strong"
+                  @click="toggleSort('quality')"
+                >
+                  {{ t('workspace.table.quality') }}{{ sortIndicator('quality') }}
+                </th>
+                <th
+                  class="w-20 cursor-pointer select-none px-3 py-2 text-right hover:text-strong"
+                  @click="toggleSort('chars')"
+                >
+                  {{ t('workspace.table.chars') }}{{ sortIndicator('chars') }}
+                </th>
+                <th class="w-px whitespace-nowrap px-3 py-2 text-right">
+                  {{ t('workspace.table.actions') }}
+                </th>
               </tr>
             </thead>
             <tbody class="divide-y divide-ink-800">
-              <tr v-if="!visibleChapters.length">
+              <tr v-if="!paginatedChapters.length">
                 <td colspan="7" class="px-3 py-10 text-center text-sm text-slate-500">
                   {{ t('workspace.table.empty') }}
                 </td>
               </tr>
-              <tr v-for="chapter in visibleChapters" :key="chapter.id" class="hover:bg-ink-850/60">
+              <tr
+                v-for="chapter in paginatedChapters"
+                :key="chapter.id"
+                class="hover:bg-ink-850/60"
+              >
                 <td class="px-3 py-2">
                   <input
                     type="checkbox"
@@ -1490,40 +1609,148 @@ onBeforeUnmount(stopStream)
                 <td class="px-3 py-2 text-right font-mono text-xs text-slate-500">
                   {{ chapter.raw_content.length }}
                 </td>
-                <td class="px-3 py-2 text-right">
-                  <button
-                    v-if="chapter.status === 'translated'"
-                    class="btn-primary !px-2 !py-0.5 text-[11px]"
-                    @click="openReader(chapter.id)"
-                  >
-                    {{ t('workspace.actions.read') }}
-                  </button>
-                  <button class="btn-ghost !px-2 !py-0.5 text-[11px]" @click="openChapter(chapter)">
-                    {{ t('workspace.actions.viewEdit') }}
-                  </button>
-                  <button
-                    v-if="
-                      chapter.status === 'translated' ||
-                      chapter.status === 'error' ||
-                      (chapter.translated_content || '').trim()
-                    "
-                    class="btn-ghost ml-1 !px-2 !py-0.5 text-[11px] text-amber-300 hover:text-amber-200"
-                    :disabled="jobActive || clearing"
-                    :title="t('workspace.tooltips.clearSingle')"
-                    @click="clearSingleTranslation(chapter)"
-                  >
-                    {{ t('workspace.actions.resetTranslation') }}
-                  </button>
-                  <button
-                    class="btn-danger ml-1 !px-2 !py-0.5 text-[11px]"
-                    @click="removeChapter(chapter)"
-                  >
-                    {{ t('common.actions.delete') }}
-                  </button>
+                <td class="whitespace-nowrap px-3 py-2 text-right">
+                  <div class="inline-flex items-center justify-end gap-1">
+                    <button
+                      v-if="chapter.status === 'translated'"
+                      class="btn-primary inline-flex items-center gap-1 !px-2 !py-1 text-[11px]"
+                      :title="t('workspace.actions.read')"
+                      :aria-label="t('workspace.actions.read')"
+                      @click="openReader(chapter.id)"
+                    >
+                      <svg
+                        class="h-3.5 w-3.5 shrink-0"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      >
+                        <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
+                        <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+                      </svg>
+                      <span class="hidden lg:inline">{{ t('workspace.actions.read') }}</span>
+                    </button>
+                    <button
+                      class="btn-ghost inline-flex items-center gap-1 !px-2 !py-1 text-[11px]"
+                      :title="t('workspace.actions.viewEdit')"
+                      :aria-label="t('workspace.actions.viewEdit')"
+                      @click="openChapter(chapter)"
+                    >
+                      <svg
+                        class="h-3.5 w-3.5 shrink-0"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      >
+                        <path d="M12 20h9" />
+                        <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                      </svg>
+                      <span class="hidden lg:inline">{{ t('workspace.actions.viewEdit') }}</span>
+                    </button>
+                    <button
+                      v-if="
+                        chapter.status === 'translated' ||
+                        chapter.status === 'error' ||
+                        (chapter.translated_content || '').trim()
+                      "
+                      class="btn-ghost inline-flex items-center gap-1 !px-2 !py-1 text-[11px] text-amber-300 hover:text-amber-200"
+                      :disabled="jobActive || clearing"
+                      :title="t('workspace.tooltips.clearSingle')"
+                      :aria-label="t('workspace.actions.resetTranslation')"
+                      @click="clearSingleTranslation(chapter)"
+                    >
+                      <svg
+                        class="h-3.5 w-3.5 shrink-0"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      >
+                        <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                        <path d="M3 3v5h5" />
+                      </svg>
+                      <span class="hidden lg:inline">{{
+                        t('workspace.actions.resetTranslation')
+                      }}</span>
+                    </button>
+                    <button
+                      class="btn-danger inline-flex items-center gap-1 !px-2 !py-1 text-[11px]"
+                      :title="t('common.actions.delete')"
+                      :aria-label="t('common.actions.delete')"
+                      @click="removeChapter(chapter)"
+                    >
+                      <svg
+                        class="h-3.5 w-3.5 shrink-0"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      >
+                        <path d="M3 6h18" />
+                        <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+                        <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+                      </svg>
+                      <span class="hidden lg:inline">{{ t('common.actions.delete') }}</span>
+                    </button>
+                  </div>
                 </td>
               </tr>
             </tbody>
           </table>
+        </div>
+
+        <div
+          v-if="visibleChapters.length"
+          class="mt-3 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-400"
+        >
+          <div class="flex flex-wrap items-center gap-3">
+            <span>
+              {{ t('workspace.table.showingRange', pageRange) }}
+            </span>
+            <label class="flex items-center gap-1.5">
+              <span class="text-slate-500">{{ t('workspace.table.perPage') }}</span>
+              <select
+                v-model.number="pageSize"
+                class="rounded-md border border-ink-700 bg-ink-850 px-2 py-1 text-xs text-slate-200 focus:border-indigo-500 focus:outline-none"
+              >
+                <option :value="25">25</option>
+                <option :value="50">50</option>
+                <option :value="100">100</option>
+                <option :value="200">200</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="flex items-center gap-1.5">
+            <button
+              type="button"
+              class="btn-ghost !px-2.5 !py-1 text-xs"
+              :disabled="currentPage <= 1"
+              @click="currentPage--"
+            >
+              {{ t('workspace.table.prev') }}
+            </button>
+            <span class="px-2 font-mono text-xs text-slate-300">
+              {{ t('workspace.table.pageOf', { page: currentPage, total: totalPages }) }}
+            </span>
+            <button
+              type="button"
+              class="btn-ghost !px-2.5 !py-1 text-xs"
+              :disabled="currentPage >= totalPages"
+              @click="currentPage++"
+            >
+              {{ t('workspace.table.next') }}
+            </button>
+          </div>
         </div>
       </template>
 

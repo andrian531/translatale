@@ -22,6 +22,13 @@ export default {
     actions: 'Actions',
     empty: 'No chapters match this filter.',
     untitled: '(untitled)',
+    showingRange: 'Showing {start}–{end} of {total}',
+    perPage: 'Per page',
+    prev: 'Prev',
+    next: 'Next',
+    pageOf: 'Page {page} / {total}',
+    searchPlaceholder: 'Search chapter # or title…',
+    clearSearch: 'Clear search',
   },
   tabs: {
     chapters: 'Chapters',
