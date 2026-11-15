@@ -21,11 +21,15 @@ const form = reactive({
   api_key: '',
   base_url: '',
   is_enabled: true,
+  is_default: false,
+  default_model: '',
   //: Free-text model list: one per line or comma separated.
   modelsText: '',
 })
 
 const savingProvider = ref(false)
+const previewingProvider = ref(false)
+const providerPreviewResult = ref(null)
 const deletingId = ref(null)
 const testingId = ref(null)
 const syncingId = ref(null)
@@ -55,7 +59,14 @@ const isCustom = computed(() => form.provider_type === 'custom')
 //: A Custom provider must be named by the user, otherwise several of them
 //: collapse into the same generic label in the routing dropdowns.
 const nameMissing = computed(() => isCustom.value && !form.display_name.trim())
-const canSaveProvider = computed(() => !savingProvider.value && !nameMissing.value)
+const formModels = computed(() => parseModelText(form.modelsText))
+const defaultModelMissing = computed(() => !form.default_model.trim())
+const canSaveProvider = computed(
+  () => !savingProvider.value && !nameMissing.value && !defaultModelMissing.value,
+)
+const defaultProvider = computed(
+  () => providers.value.find((item) => item.is_default && item.is_enabled) ?? null,
+)
 
 function parseModelText(text) {
   return [
@@ -138,7 +149,10 @@ function resetForm() {
   form.api_key = ''
   form.base_url = ''
   form.is_enabled = true
+  form.is_default = false
+  form.default_model = ''
   form.modelsText = ''
+  providerPreviewResult.value = null
   applyTypeDefaults()
 }
 
@@ -167,7 +181,10 @@ function editProvider(provider) {
   form.api_key = ''
   form.base_url = provider.base_url
   form.is_enabled = provider.is_enabled
+  form.is_default = Boolean(provider.is_default)
+  form.default_model = provider.default_model || ''
   form.modelsText = (provider.available_models ?? []).join('\n')
+  providerPreviewResult.value = null
   window.scrollTo({ top: 0, behavior: 'smooth' })
 }
 
@@ -240,9 +257,42 @@ async function saveScraperSettings() {
   }
 }
 
+async function previewProviderForm() {
+  previewingProvider.value = true
+  providerPreviewResult.value = null
+  try {
+    const result = await settingsApi.previewProvider({
+      id: form.id,
+      provider_type: form.provider_type,
+      api_key: form.api_key || null,
+      base_url: form.base_url || null,
+      model: form.default_model.trim() || null,
+    })
+    providerPreviewResult.value = result
+    if (result.ok && Array.isArray(result.models) && result.models.length) {
+      form.modelsText = result.models.join('\n')
+      if (!form.default_model.trim()) {
+        form.default_model = result.models.includes(result.model)
+          ? result.model
+          : result.models[0]
+      }
+    } else if (result.ok && !form.default_model.trim() && result.model) {
+      form.default_model = result.model
+    }
+  } catch (error) {
+    providerPreviewResult.value = { ok: false, message: error.message, models: [] }
+  } finally {
+    previewingProvider.value = false
+  }
+}
+
 async function saveProvider() {
   if (nameMissing.value) {
     flash('error', t('settings.providers.nameMissing'))
+    return
+  }
+  if (defaultModelMissing.value) {
+    flash('error', t('settings.providers.defaultModelRequired'))
     return
   }
   savingProvider.value = true
@@ -252,6 +302,8 @@ async function saveProvider() {
       display_name: form.display_name.trim() || providerLabel(form.provider_type),
       base_url: form.base_url,
       is_enabled: form.is_enabled,
+      is_default: form.is_default,
+      default_model: form.default_model.trim(),
       available_models: parseModelText(form.modelsText),
     }
     if (form.id !== null) payload.id = form.id
@@ -516,6 +568,57 @@ onMounted(loadAll)
               </p>
             </div>
 
+            <div class="flex flex-col gap-2">
+              <button
+                type="button"
+                class="btn-ghost w-full justify-center"
+                :disabled="previewingProvider"
+                @click="previewProviderForm"
+              >
+                {{
+                  previewingProvider
+                    ? t('settings.providers.testingAndFetching')
+                    : t('settings.providers.testAndFetch')
+                }}
+              </button>
+              <p
+                v-if="providerPreviewResult"
+                class="rounded-lg border px-3 py-2 text-xs"
+                :class="
+                  providerPreviewResult.ok
+                    ? 'border-emerald-800/60 bg-emerald-950/30 text-emerald-300'
+                    : 'border-rose-800/60 bg-rose-950/30 text-rose-300'
+                "
+              >
+                <span class="font-medium">
+                  {{
+                    providerPreviewResult.ok
+                      ? t('settings.providers.previewOk', {
+                          count: providerPreviewResult.model_count ?? 0,
+                        })
+                      : t('settings.providers.testFailed')
+                  }}
+                </span>
+                {{ providerPreviewResult.message }}
+              </p>
+            </div>
+
+            <div>
+              <label class="label" for="default-model">
+                {{ t('settings.providers.defaultModelLabel') }}
+                <span class="text-rose-400">*</span>
+              </label>
+              <ModelSelect
+                v-model="form.default_model"
+                :models="formModels"
+                :placeholder="t('settings.providers.defaultModelPlaceholder')"
+                :empty-hint="t('settings.providers.defaultModelEmptyHint')"
+              />
+              <p v-if="defaultModelMissing" class="mt-1 text-xs text-amber-400">
+                {{ t('settings.providers.defaultModelRequired') }}
+              </p>
+            </div>
+
             <div>
               <label class="label" for="models-text">
                 {{ t('settings.providers.modelsLabel') }}
@@ -536,14 +639,24 @@ onMounted(loadAll)
               </p>
             </div>
 
-            <label class="flex items-center gap-2 text-sm text-slate-300">
-              <input
-                v-model="form.is_enabled"
-                type="checkbox"
-                class="h-4 w-4 rounded border-ink-600 bg-ink-850 text-indigo-600 focus:ring-indigo-500"
-              />
-              {{ t('settings.providers.enabled') }}
-            </label>
+            <div class="flex flex-col gap-2">
+              <label class="flex items-center gap-2 text-sm text-slate-300">
+                <input
+                  v-model="form.is_enabled"
+                  type="checkbox"
+                  class="h-4 w-4 rounded border-ink-600 bg-ink-850 text-indigo-600 focus:ring-indigo-500"
+                />
+                {{ t('settings.providers.enabled') }}
+              </label>
+              <label class="flex items-center gap-2 text-sm text-slate-300">
+                <input
+                  v-model="form.is_default"
+                  type="checkbox"
+                  class="h-4 w-4 rounded border-ink-600 bg-ink-850 text-indigo-600 focus:ring-indigo-500"
+                />
+                {{ t('settings.providers.setAsDefault') }}
+              </label>
+            </div>
 
             <button type="submit" class="btn-primary w-full" :disabled="!canSaveProvider">
               {{
@@ -594,6 +707,16 @@ onMounted(loadAll)
                         })
                       }}
                     </span>
+                    <span
+                      v-if="provider.is_default"
+                      class="badge bg-indigo-950/70 text-indigo-300"
+                      >{{ t('settings.providers.defaultBadge') }}</span
+                    >
+                    <span
+                      v-if="provider.default_model"
+                      class="badge bg-ink-850 font-mono text-slate-300"
+                      >{{ provider.default_model }}</span
+                    >
                     <span
                       v-if="!provider.is_enabled"
                       class="badge bg-amber-950/60 text-amber-400"
@@ -696,7 +819,7 @@ onMounted(loadAll)
           <span class="text-xs text-slate-500">{{ t('settings.tasks.slotCount') }}</span>
         </div>
 
-        <div class="grid gap-4 md:grid-cols-3">
+        <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <form
             v-for="task in tasks"
             v-show="taskDrafts[task.task_name]"
@@ -707,6 +830,17 @@ onMounted(loadAll)
             <div>
               <h3 class="text-sm font-semibold text-slate-100">{{ taskLabel(task) }}</h3>
               <p class="mt-0.5 font-mono text-[11px] text-slate-500">{{ task.task_name }}</p>
+              <p
+                v-if="!taskDrafts[task.task_name].provider_id && defaultProvider?.default_model"
+                class="mt-1 text-[11px] text-indigo-300"
+              >
+                {{
+                  t('settings.tasks.usingDefaultHint', {
+                    provider: defaultProvider.display_name,
+                    model: defaultProvider.default_model,
+                  })
+                }}
+              </p>
             </div>
 
             <div>

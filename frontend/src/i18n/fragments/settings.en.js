@@ -48,11 +48,20 @@ export default {
     flashSyncSaved: '{name}: {count} models saved.',
     confirmDelete: 'Delete provider "{name}"?',
     nameMissing: 'A provider name is required for the Custom type (e.g. Kenari, Groq, Together).',
+    testAndFetch: 'Test & Get Model List',
+    testingAndFetching: 'Testing & fetching models…',
+    previewOk: 'Connected ({count} models)',
+    defaultModelLabel: 'Default model',
+    defaultModelPlaceholder: 'Pick or type a default model',
+    defaultModelEmptyHint: 'Click "Test & Get Model List" above, or type a model name manually.',
+    defaultModelRequired: 'Default model is required before saving.',
+    setAsDefault: 'Set as default provider (used when a task slot is unset)',
+    defaultBadge: 'default',
   },
 
   tasks: {
     title: 'Model routing per task',
-    slotCount: '3 slots',
+    slotCount: '4 slots',
     provider: 'Provider',
     providerNone: '— none selected —',
     disabledSuffix: ' (disabled)',
@@ -76,6 +85,7 @@ export default {
     fallbackEmptyHintNoProvider: 'Pick a fallback provider first.',
     saved: 'saved ✓',
     notConfigured: 'not configured',
+    usingDefaultHint: 'Using default: {provider} · {model}',
     flashSaveFailed: 'Could not save routing for {label}: {message}',
   },
 
@@ -117,5 +127,6 @@ export default {
     translate: 'Translate',
     scrape_analysis: 'Scraping / Site Analysis',
     story_analysis: 'Story analysis',
+    cover_prompt: 'Cover Prompt Generator',
   },
 }

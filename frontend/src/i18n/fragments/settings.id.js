@@ -48,11 +48,20 @@ export default {
     flashSyncSaved: '{name}: {count} model tersimpan.',
     confirmDelete: 'Hapus provider "{name}"?',
     nameMissing: 'Nama provider wajib diisi untuk tipe Custom (mis. Kenari, Groq, Together).',
+    testAndFetch: 'Test & Ambil Daftar Model',
+    testingAndFetching: 'Menguji & mengambil model…',
+    previewOk: 'Terhubung ({count} model)',
+    defaultModelLabel: 'Model default',
+    defaultModelPlaceholder: 'Pilih atau ketik model default',
+    defaultModelEmptyHint: 'Klik "Test & Ambil Daftar Model" di atas, atau ketik nama model manual.',
+    defaultModelRequired: 'Model default wajib diisi sebelum menyimpan.',
+    setAsDefault: 'Jadikan provider default (dipakai jika slot proses belum diisi)',
+    defaultBadge: 'default',
   },
 
   tasks: {
     title: 'Model Routing per Proses',
-    slotCount: '3 slot',
+    slotCount: '4 slot',
     provider: 'Provider',
     providerNone: '— belum dipilih —',
     disabledSuffix: ' (nonaktif)',
@@ -76,6 +85,7 @@ export default {
     fallbackEmptyHintNoProvider: 'Pilih provider cadangan dulu.',
     saved: 'tersimpan ✓',
     notConfigured: 'belum dikonfigurasi',
+    usingDefaultHint: 'Memakai default: {provider} · {model}',
     flashSaveFailed: 'Gagal menyimpan routing {label}: {message}',
   },
 
@@ -117,5 +127,6 @@ export default {
     translate: 'Translate',
     scrape_analysis: 'Scraping / Analisa Situs',
     story_analysis: 'Analisa Cerita',
+    cover_prompt: 'Generator Prompt Cover',
   },
 }

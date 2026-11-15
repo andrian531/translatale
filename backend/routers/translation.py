@@ -169,7 +169,10 @@ async def create_cover_prompt(
     novel_id: int, payload: CoverPromptPayload | None = None
 ) -> dict[str, Any]:
     _require_novel(novel_id)
-    _require_task("story_analysis")
+    try:
+        TaskRouter("cover_prompt").resolve()
+    except TaskNotConfiguredError:
+        _require_task("story_analysis")
     opts = payload or CoverPromptPayload()
     try:
         return await generate_cover_prompt(

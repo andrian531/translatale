@@ -11,7 +11,8 @@ from core.analyzer import _generate_analysis_with_fallback
 from core.reference import load_reference
 from llm.base import LLMError, TaskNotConfiguredError, TaskRouter
 
-TASK_NAME = "story_analysis"
+TASK_NAME = "cover_prompt"
+FALLBACK_TASK_NAME = "story_analysis"
 
 COVER_STYLE_PRESETS = {
     "webnovel_cover": "polished commercial webnovel cover illustration, dramatic painterly anime-fantasy rendering, intricate costume & environment details",
@@ -114,12 +115,18 @@ async def generate_cover_prompt(
     router = TaskRouter(TASK_NAME, db_path=db_path)
     try:
         resolved = router.resolve()
-    except TaskNotConfiguredError as exc:
-        raise CoverPromptError(
-            "Task 'story_analysis' belum dikonfigurasi. Buka Settings → Model Routing "
-            f"per Proses dan pilih provider + model untuk Analisa Cerita. ({exc})"
-        ) from exc
-    fallback = router.resolve_fallback()
+        fallback = router.resolve_fallback()
+    except TaskNotConfiguredError:
+        fb_router = TaskRouter(FALLBACK_TASK_NAME, db_path=db_path)
+        try:
+            resolved = fb_router.resolve()
+            fallback = fb_router.resolve_fallback()
+        except TaskNotConfiguredError as exc:
+            raise CoverPromptError(
+                "Task 'cover_prompt' (atau 'story_analysis') belum dikonfigurasi. "
+                "Buka Settings → Model Routing per Proses atau set Default Provider & Model. "
+                f"({exc})"
+            ) from exc
 
     reference = load_reference(novel_id, db_path)
     title = (novel.get("title_translated") or novel.get("title") or "").strip()

@@ -22,9 +22,11 @@ CREATE TABLE IF NOT EXISTS provider_configs (
     display_name  TEXT    NOT NULL,
     api_key       TEXT    NOT NULL DEFAULT '',
     base_url      TEXT    NOT NULL DEFAULT '',
-    is_enabled    INTEGER NOT NULL DEFAULT 1,
-    updated_at    TEXT    NOT NULL,
-    available_models TEXT NOT NULL DEFAULT '[]'
+    is_enabled       INTEGER NOT NULL DEFAULT 1,
+    updated_at       TEXT    NOT NULL,
+    available_models TEXT    NOT NULL DEFAULT '[]',
+    default_model    TEXT    NOT NULL DEFAULT '',
+    is_default       INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS task_models (
@@ -151,6 +153,8 @@ def get_conn(db_path: Path | str | None = None) -> Iterator[sqlite3.Connection]:
 #: databases need an explicit ``ALTER TABLE``.
 COLUMN_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("provider_configs", "available_models", "TEXT NOT NULL DEFAULT '[]'"),
+    ("provider_configs", "default_model", "TEXT NOT NULL DEFAULT ''"),
+    ("provider_configs", "is_default", "INTEGER NOT NULL DEFAULT 0"),
     ("novels", "synopsis_translated", "TEXT NOT NULL DEFAULT ''"),
     ("novels", "cover_path", "TEXT NOT NULL DEFAULT ''"),
     ("task_models", "fallback_provider_id", "INTEGER REFERENCES provider_configs(id) ON DELETE SET NULL"),

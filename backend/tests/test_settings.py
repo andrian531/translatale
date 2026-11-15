@@ -633,3 +633,72 @@ def test_test_connection_survives_a_broken_model_list(client, monkeypatch):
     assert response.status_code == 200
     assert response.json()["ok"] is True
     assert response.json()["models_synced"] is False
+
+
+# --------------------------------------------------------------------------
+# Default provider/model, preview & cover_prompt slot
+# --------------------------------------------------------------------------
+def test_preview_provider_tests_and_lists_models(client, monkeypatch):
+    _fake_httpx(monkeypatch, {"data": [{"id": "gpt-4o-mini"}, {"id": "gpt-4o"}]})
+
+    response = client.post(
+        "/api/settings/providers/preview",
+        json={"provider_type": "openai", "api_key": "sk-preview"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert body["models"] == ["gpt-4o", "gpt-4o-mini"]
+    assert body["model_count"] == 2
+
+
+def test_default_provider_model_used_as_fallback_for_unconfigured_tasks(client):
+    first = client.post(
+        "/api/settings/providers",
+        json={
+            "provider_type": "openai",
+            "api_key": "sk-first",
+            "default_model": "gpt-4o-mini",
+            "is_default": True,
+        },
+    ).json()
+    assert first["is_default"] is True
+    assert first["default_model"] == "gpt-4o-mini"
+
+    # Second default provider unsets the first one.
+    second = client.post(
+        "/api/settings/providers",
+        json={
+            "provider_type": "gemini",
+            "api_key": "AIza-second",
+            "default_model": "gemini-2.0-flash",
+            "is_default": True,
+        },
+    ).json()
+    assert second["is_default"] is True
+    providers = {p["id"]: p for p in client.get("/api/settings/providers").json()}
+    assert providers[first["id"]]["is_default"] is False
+
+    # Unconfigured task slots resolve to the active default provider + default_model.
+    resolved = TaskRouter("translate").resolve()
+    assert resolved.provider_type == "gemini"
+    assert resolved.model == "gemini-2.0-flash"
+    assert resolved.provider.api_key == "AIza-second"
+
+
+def test_tasks_endpoint_includes_cover_prompt_slot(client):
+    tasks = client.get("/api/settings/tasks").json()
+    names = [t["task_name"] for t in tasks]
+    assert "cover_prompt" in names
+    assert names == ["translate", "scrape_analysis", "story_analysis", "cover_prompt"]
+
+    provider = client.post(
+        "/api/settings/providers",
+        json={"provider_type": "openai", "api_key": "sk-cover", "default_model": "gpt-4o-mini"},
+    ).json()
+    saved = client.put(
+        "/api/settings/tasks/cover_prompt",
+        json={"provider_id": provider["id"], "model_name": "gpt-4o"},
+    )
+    assert saved.status_code == 200
+    assert saved.json()["model_name"] == "gpt-4o"

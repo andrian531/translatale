@@ -186,10 +186,59 @@ class TaskRouter:
             max_tokens=int(max_tokens),
         )
 
+    def _resolve_default_provider(
+        self, temperature: float, max_tokens: int
+    ) -> ResolvedTask | None:
+        """Fall back to the provider marked ``is_default = 1`` when it has a ``default_model``."""
+        with database.get_conn(self.db_path) as conn:
+            row = conn.execute(
+                """
+                SELECT id, provider_type, api_key, base_url, default_model
+                FROM provider_configs
+                WHERE is_default = 1 AND is_enabled = 1 AND trim(default_model) <> ''
+                LIMIT 1
+                """
+            ).fetchone()
+        if row is None:
+            return None
+        return self._build_resolved(
+            provider_id=int(row["id"]),
+            provider_type=row["provider_type"],
+            api_key=row["api_key"],
+            base_url=row["base_url"],
+            model_name=row["default_model"],
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+
     def resolve(self) -> ResolvedTask:
         row = self._fetch()
         if row is None:
             raise TaskNotConfiguredError(f"Unknown task: {self.task_name}")
+
+        has_explicit = (
+            row["provider_id"] is not None
+            and bool(row["is_enabled"])
+            and bool((row["model_name"] or "").strip())
+        )
+        if has_explicit:
+            return self._build_resolved(
+                provider_id=int(row["provider_id"]),
+                provider_type=row["provider_type"],
+                api_key=row["api_key"],
+                base_url=row["base_url"],
+                model_name=row["model_name"],
+                temperature=float(row["temperature"]),
+                max_tokens=int(row["max_tokens"]),
+            )
+
+        default_resolved = self._resolve_default_provider(
+            temperature=float(row["temperature"]),
+            max_tokens=int(row["max_tokens"]),
+        )
+        if default_resolved is not None:
+            return default_resolved
+
         if row["provider_id"] is None:
             raise TaskNotConfiguredError(
                 f"Task '{self.task_name}' has no provider assigned yet"
@@ -198,19 +247,8 @@ class TaskRouter:
             raise TaskNotConfiguredError(
                 f"Provider '{row['display_name']}' for task '{self.task_name}' is disabled"
             )
-        if not (row["model_name"] or "").strip():
-            raise TaskNotConfiguredError(
-                f"Task '{self.task_name}' has no model name configured"
-            )
-
-        return self._build_resolved(
-            provider_id=int(row["provider_id"]),
-            provider_type=row["provider_type"],
-            api_key=row["api_key"],
-            base_url=row["base_url"],
-            model_name=row["model_name"],
-            temperature=float(row["temperature"]),
-            max_tokens=int(row["max_tokens"]),
+        raise TaskNotConfiguredError(
+            f"Task '{self.task_name}' has no model name configured"
         )
 
     def resolve_fallback(self) -> ResolvedTask | None:

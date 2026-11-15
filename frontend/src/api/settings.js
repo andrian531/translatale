@@ -6,6 +6,8 @@ export const settingsApi = {
   listProviders: () => request('/settings/providers'),
   saveProvider: (payload) =>
     request('/settings/providers', { method: 'POST', body: JSON.stringify(payload) }),
+  previewProvider: (payload) =>
+    request('/settings/providers/preview', { method: 'POST', body: JSON.stringify(payload) }),
   deleteProvider: (id) => request(`/settings/providers/${id}`, { method: 'DELETE' }),
   testProvider: (id, model) =>
     request(`/settings/providers/${id}/test`, {

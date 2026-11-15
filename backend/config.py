@@ -17,13 +17,14 @@ DATA_DIR = Path(os.environ.get("TRANSLATALE_DATA_DIR") or (BASE_DIR / "data")).r
 #: Default database location (``data/translatale.db``).
 DB_PATH = Path(os.environ.get("TRANSLATALE_DB_PATH") or (DATA_DIR / "translatale.db")).resolve()
 
-#: The three routing slots the GUI exposes.
-TASKS: tuple[str, ...] = ("translate", "scrape_analysis", "story_analysis")
+#: The four routing slots the GUI exposes.
+TASKS: tuple[str, ...] = ("translate", "scrape_analysis", "story_analysis", "cover_prompt")
 
 TASK_LABELS: dict[str, str] = {
     "translate": "Translate",
     "scrape_analysis": "Scraping / Site Analysis",
     "story_analysis": "Analisa Cerita",
+    "cover_prompt": "Cover Prompt Generator",
 }
 
 #: Supported provider types (order matters: it drives the frontend dropdown).

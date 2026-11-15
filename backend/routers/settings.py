@@ -20,7 +20,7 @@ router = APIRouter(prefix="/api/settings", tags=["settings"])
 ProviderType = Literal[
     "gemini", "openai", "openrouter", "deepseek", "anthropic", "custom", "ollama"
 ]
-TaskName = Literal["translate", "scrape_analysis", "story_analysis"]
+TaskName = Literal["translate", "scrape_analysis", "story_analysis", "cover_prompt"]
 
 MASK_PREFIX = "****"
 
@@ -39,8 +39,10 @@ class ProviderPayload(BaseModel):
     is_enabled: bool = True
     #: ``None`` means "leave whatever is stored"; a list replaces it.
     available_models: list[str] | None = None
+    default_model: str = ""
+    is_default: bool = False
 
-    @field_validator("display_name", "api_key", "base_url")
+    @field_validator("display_name", "api_key", "base_url", "default_model")
     @classmethod
     def _strip(cls, value: str | None) -> str | None:
         return value.strip() if isinstance(value, str) else value
@@ -60,6 +62,16 @@ class ProviderPayload(BaseModel):
         return cleaned
 
 
+class ProviderPreviewPayload(BaseModel):
+    """Credentials to test and list models before saving a provider."""
+
+    id: int | None = None
+    provider_type: ProviderType
+    api_key: str | None = None
+    base_url: str | None = None
+    model: str | None = None
+
+
 class ProviderOut(BaseModel):
     id: int
     provider_type: str
@@ -69,6 +81,8 @@ class ProviderOut(BaseModel):
     base_url: str
     is_enabled: bool
     available_models: list[str] = Field(default_factory=list)
+    default_model: str = ""
+    is_default: bool = False
     updated_at: str
 
 
@@ -156,6 +170,8 @@ def _provider_row_to_out(row: sqlite3.Row) -> ProviderOut:
         base_url=row["base_url"] or "",
         is_enabled=bool(row["is_enabled"]),
         available_models=_parse_models(row["available_models"] if "available_models" in keys else "[]"),
+        default_model=(row["default_model"] or "") if "default_model" in keys else "",
+        is_default=bool(row["is_default"]) if "is_default" in keys else False,
         updated_at=row["updated_at"],
     )
 
@@ -263,8 +279,20 @@ def upsert_provider(payload: ProviderPayload) -> ProviderOut:
         base_url = config.DEFAULT_BASE_URLS.get(payload.provider_type, "")
 
     models_json = json.dumps(payload.available_models or [], ensure_ascii=False)
+    default_model = (payload.default_model or "").strip()
 
     with database.get_conn() as conn:
+        is_default = bool(payload.is_default) and payload.is_enabled
+        if payload.id is None and payload.is_enabled and default_model and not is_default:
+            has_default = conn.execute(
+                "SELECT 1 FROM provider_configs WHERE is_default = 1 AND is_enabled = 1 LIMIT 1"
+            ).fetchone()
+            if not has_default:
+                is_default = True
+
+        if is_default:
+            conn.execute("UPDATE provider_configs SET is_default = 0")
+
         if payload.id is not None:
             existing = _fetch_provider(conn, payload.id)
             # An empty or masked key means "keep the stored one".
@@ -280,7 +308,8 @@ def upsert_provider(payload: ProviderPayload) -> ProviderOut:
                 """
                 UPDATE provider_configs
                    SET provider_type = ?, display_name = ?, api_key = ?,
-                       base_url = ?, is_enabled = ?, available_models = ?, updated_at = ?
+                       base_url = ?, is_enabled = ?, available_models = ?,
+                       default_model = ?, is_default = ?, updated_at = ?
                  WHERE id = ?
                 """,
                 (
@@ -290,6 +319,8 @@ def upsert_provider(payload: ProviderPayload) -> ProviderOut:
                     base_url,
                     1 if payload.is_enabled else 0,
                     models_json,
+                    default_model,
+                    1 if is_default else 0,
                     now,
                     payload.id,
                 ),
@@ -300,8 +331,8 @@ def upsert_provider(payload: ProviderPayload) -> ProviderOut:
                 """
                 INSERT INTO provider_configs
                     (provider_type, display_name, api_key, base_url, is_enabled,
-                     available_models, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                     available_models, default_model, is_default, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     payload.provider_type,
@@ -310,12 +341,65 @@ def upsert_provider(payload: ProviderPayload) -> ProviderOut:
                     base_url,
                     1 if payload.is_enabled else 0,
                     models_json,
+                    default_model,
+                    1 if is_default else 0,
                     now,
                 ),
             )
             row = _fetch_provider(conn, int(cursor.lastrowid or 0))
 
     return _provider_row_to_out(row)
+
+
+@router.post("/providers/preview")
+async def preview_provider(payload: ProviderPreviewPayload) -> dict[str, Any]:
+    """Test credentials and fetch available models before saving a provider."""
+    api_key = payload.api_key or ""
+    if payload.id is not None and (api_key == "" or _is_masked(api_key)):
+        with database.get_conn() as conn:
+            existing = _fetch_provider(conn, payload.id)
+        api_key = existing["api_key"] or ""
+
+    base_url = payload.base_url
+    if base_url is None or base_url == "":
+        base_url = config.DEFAULT_BASE_URLS.get(payload.provider_type, "")
+
+    model = (payload.model or "").strip() or config.DEFAULT_MODELS.get(
+        payload.provider_type, ""
+    )
+
+    try:
+        provider = create_provider(
+            provider_type=payload.provider_type,
+            api_key=api_key,
+            base_url=base_url,
+        )
+        result = await provider.test_connection(model=model or None)
+    except LLMError as exc:
+        return {
+            "ok": False,
+            "model": model,
+            "models": [],
+            "model_count": 0,
+            "message": str(exc),
+        }
+
+    ok = bool(result.get("ok"))
+    synced: list[str] = []
+    if ok:
+        try:
+            synced = sorted({m for m in await provider.list_models() if m})
+        except Exception:  # noqa: BLE001
+            synced = []
+
+    reported = synced or list(result.get("models") or [])
+    return {
+        "ok": ok,
+        "model": result.get("model", model),
+        "models": reported,
+        "model_count": len(reported),
+        "message": result.get("message", ""),
+    }
 
 
 @router.delete("/providers/{provider_id}")
@@ -453,7 +537,7 @@ def list_tasks() -> list[TaskOut]:
         rows = conn.execute(
             TASK_SELECT + " ORDER BY CASE t.task_name "
             "WHEN 'translate' THEN 0 WHEN 'scrape_analysis' THEN 1 "
-            "WHEN 'story_analysis' THEN 2 ELSE 3 END"
+            "WHEN 'story_analysis' THEN 2 WHEN 'cover_prompt' THEN 3 ELSE 4 END"
         ).fetchall()
     return [_task_row_to_out(row) for row in rows]
 
