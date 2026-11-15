@@ -12,7 +12,18 @@ Web-based AI Novel Translator with modular per-site scrapers, multi-provider LLM
   - Story & Context Analysis
 - **Input Modes:** Modular per-website scrapers (`scrapers/sites/<site>.py`) and manual chapter input (paste / upload).
 
-## Running (Phase 1)
+## Running
+
+**Quick Start (Windows):**
+
+Double-click `start.bat` (atau jalankan `.\start.bat` di terminal). Script ini otomatis:
+- Membuat `backend\.venv` dan menginstall `requirements.txt` (saat pertama kali atau jika ada update)
+- Menginstall `frontend\node_modules` via `npm` (saat pertama kali atau jika `package.json` berubah)
+- Menjalankan backend (`8000`) & frontend (`5173`) dalam **1 window** dengan prefix log `[BE]` dan `[FE]`, lalu membuka `http://localhost:5173` di browser
+
+Untuk menghentikan kedua server, cukup tekan `Ctrl+C` atau tutup window `start.bat` (atau jalankan `stop.bat` jika perlu membersihkan proses yang tersisa).
+
+**Manual Setup:**
 
 **Backend** (Python 3.10+):
 
