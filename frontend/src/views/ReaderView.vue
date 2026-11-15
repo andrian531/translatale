@@ -3,9 +3,12 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { novelsApi } from '@/api/novels'
 import { readerApi } from '@/api/reader'
+import { useI18n } from '@/i18n'
 
 const route = useRoute()
 const router = useRouter()
+
+const { t, locale } = useI18n()
 
 const novelId = computed(() => Number(route.params.id))
 
@@ -48,11 +51,12 @@ const themes = {
     accent: 'text-[#8a5a2b]',
   },
   dark: {
-    shell: 'bg-ink-950 text-slate-200',
-    panel: 'bg-ink-900/95 border-ink-700',
-    muted: 'text-slate-500',
-    soft: 'bg-ink-850',
-    accent: 'text-indigo-300',
+    // Hard-coded on purpose: the reader theme must not follow the global one.
+    shell: 'bg-[#0b0d12] text-[#e2e8f0]',
+    panel: 'bg-[#11141b]/95 border-[#2a3140]',
+    muted: 'text-[#94a3b8]',
+    soft: 'bg-[#161a23]',
+    accent: 'text-[#a5b4fc]',
   },
 }
 
@@ -187,7 +191,7 @@ async function saveProgress(percent) {
       chapter_id: chapter.value.id,
       scroll_percent: value,
     })
-    savedAt.value = new Date().toLocaleTimeString('id-ID')
+    savedAt.value = new Date().toLocaleTimeString(locale.value === 'id' ? 'id-ID' : 'en-GB')
   } catch {
     /* progress is best-effort; never block reading */
   }
@@ -260,7 +264,8 @@ onBeforeUnmount(() => {
         <button
           class="rounded px-2 py-1 text-xs hover:opacity-70"
           :class="themeClass.muted"
-          title="Tampilkan/sembunyikan daftar bab"
+          :title="t('reader.toggleToc')"
+          :aria-label="t('reader.toggleToc')"
           @click="toggleSidebar"
         >
           ☰
@@ -270,11 +275,11 @@ onBeforeUnmount(() => {
           :class="themeClass.muted"
           @click="router.push(`/novels/${novelId}`)"
         >
-          ← Workspace
+          ← {{ t('reader.toWorkspace') }}
         </button>
 
         <span class="truncate text-sm font-medium">
-          {{ novel?.title_translated || novel?.title || 'Reader' }}
+          {{ novel?.title_translated || novel?.title || t('reader.fallbackTitle') }}
         </span>
 
         <div class="ml-auto flex flex-wrap items-center gap-1">
@@ -287,7 +292,7 @@ onBeforeUnmount(() => {
               :class="theme === option ? 'bg-indigo-600 text-white' : themeClass.muted"
               @click="setTheme(option)"
             >
-              {{ option }}
+              {{ t(`reader.theme.${option}`) }}
             </button>
           </div>
 
@@ -296,7 +301,8 @@ onBeforeUnmount(() => {
             <button
               class="rounded border px-2 py-1 text-[11px]"
               :class="themeClass.panel"
-              title="Perkecil font"
+              :title="t('reader.font.smaller')"
+              :aria-label="t('reader.font.smaller')"
               @click="changeFont(-1)"
             >
               A-
@@ -307,7 +313,8 @@ onBeforeUnmount(() => {
             <button
               class="rounded border px-2 py-1 text-[11px]"
               :class="themeClass.panel"
-              title="Perbesar font"
+              :title="t('reader.font.larger')"
+              :aria-label="t('reader.font.larger')"
               @click="changeFont(1)"
             >
               A+
@@ -323,7 +330,7 @@ onBeforeUnmount(() => {
               :class="width === option ? 'bg-indigo-600 text-white' : themeClass.muted"
               @click="setWidth(option)"
             >
-              {{ option === 'narrow' ? 'Sempit' : option === 'normal' ? 'Normal' : 'Lebar' }}
+              {{ t(`reader.width.${option}`) }}
             </button>
           </div>
 
@@ -332,25 +339,25 @@ onBeforeUnmount(() => {
             :class="showRaw ? 'bg-indigo-600 text-white' : themeClass.panel"
             @click="showRaw = !showRaw"
           >
-            Raw
+            {{ t('reader.raw') }}
           </button>
         </div>
       </div>
 
       <div class="mt-1 flex items-center gap-2 text-[11px]" :class="themeClass.muted">
         <button :disabled="!prevChapter" class="disabled:opacity-30" @click="goTo(prevChapter)">
-          ← Prev
+          ← {{ t('reader.prev') }}
         </button>
         <span class="truncate">
           <template v-if="chapter">
-            Bab {{ chapter.chapter_number }} / {{ chapters.length }}
+            {{ t('reader.chapterOf', { number: chapter.chapter_number, total: chapters.length }) }}
             <span v-if="chapter.title_translated"> · {{ chapter.title_translated }}</span>
           </template>
         </span>
         <button :disabled="!nextChapter" class="disabled:opacity-30" @click="goTo(nextChapter)">
-          Next →
+          {{ t('reader.next') }} →
         </button>
-        <span class="ml-auto">{{ scrollPercent }}%</span>
+        <span class="ml-auto">{{ t('reader.progressPercent', { percent: scrollPercent }) }}</span>
       </div>
 
       <div class="mt-1 h-0.5 w-full overflow-hidden rounded" :class="themeClass.soft">
@@ -367,7 +374,7 @@ onBeforeUnmount(() => {
         :class="themeClass.panel"
       >
         <p class="px-3 py-2 text-[11px] uppercase tracking-wide" :class="themeClass.muted">
-          Daftar Bab ({{ chapters.length }})
+          {{ t('reader.tocHeading', { count: chapters.length }) }}
         </p>
         <ul>
           <li v-for="item in chapters" :key="item.id">
@@ -384,12 +391,12 @@ onBeforeUnmount(() => {
                 {{ item.chapter_number }}
               </span>
               <span class="min-w-0 flex-1 truncate">
-                {{ item.title_translated || item.title || '(tanpa judul)' }}
+                {{ item.title_translated || item.title || t('reader.untitled') }}
               </span>
               <span
                 class="h-1.5 w-1.5 shrink-0 rounded-full"
                 :class="item.status === 'translated' ? 'bg-emerald-500' : 'bg-slate-600'"
-                :title="item.status"
+                :title="t(`common.status.${item.status}`)"
               />
             </button>
           </li>
@@ -398,7 +405,9 @@ onBeforeUnmount(() => {
 
       <!-- content -->
       <main ref="scrollEl" class="min-w-0 flex-1 overflow-y-auto" @scroll="onScroll">
-        <p v-if="loading" class="p-8 text-sm" :class="themeClass.muted">Memuat…</p>
+        <p v-if="loading" class="p-8 text-sm" :class="themeClass.muted">
+          {{ t('common.actions.loading') }}
+        </p>
 
         <div v-else-if="error" class="p-8 text-sm text-rose-400">{{ error }}</div>
 
@@ -407,9 +416,9 @@ onBeforeUnmount(() => {
           class="mx-auto max-w-md px-6 py-24 text-center text-sm"
           :class="themeClass.muted"
         >
-          Novel ini belum punya bab.
+          {{ t('reader.noChapters') }}
           <button class="ml-1 underline" @click="router.push(`/novels/${novelId}`)">
-            Kembali ke workspace
+            {{ t('reader.backToWorkspace') }}
           </button>
         </div>
 
@@ -419,12 +428,12 @@ onBeforeUnmount(() => {
               {{ chapter.title_translated || chapter.title }}
             </h1>
             <p class="mb-6 text-xs" :class="themeClass.muted">
-              Bab {{ chapter.chapter_number }}
+              {{ t('reader.chapterLabel', { number: chapter.chapter_number }) }}
               <span v-if="chapter.title_translated && chapter.title !== chapter.title_translated">
                 · {{ chapter.title }}
               </span>
               <span v-if="chapter.quality_score !== null && chapter.quality_score !== undefined">
-                · skor {{ Math.round(chapter.quality_score) }}
+                · {{ t('reader.qualityScore', { score: Math.round(chapter.quality_score) }) }}
               </span>
             </p>
 
@@ -433,9 +442,9 @@ onBeforeUnmount(() => {
               class="mb-6 rounded-lg border px-4 py-3 text-sm"
               :class="themeClass.soft"
             >
-              Bab ini belum diterjemahkan — menampilkan teks sumber.
+              {{ t('reader.notTranslated') }}
               <button class="ml-1 underline" @click="router.push(`/novels/${novelId}`)">
-                Buka workspace
+                {{ t('reader.openWorkspace') }}
               </button>
             </div>
 
@@ -451,7 +460,7 @@ onBeforeUnmount(() => {
             <!-- raw peek -->
             <section v-if="showRaw" class="mt-10 border-t pt-6" :class="themeClass.panel">
               <h2 class="mb-2 text-xs uppercase tracking-wide" :class="themeClass.muted">
-                Teks sumber (raw)
+                {{ t('reader.rawSource') }}
               </h2>
               <div
                 class="space-y-3 whitespace-pre-wrap font-mono text-[13px] leading-relaxed opacity-80"
@@ -468,7 +477,7 @@ onBeforeUnmount(() => {
                 :disabled="!prevChapter"
                 @click="goTo(prevChapter)"
               >
-                ← {{ prevChapter ? prevChapter.title_translated || prevChapter.title : 'Prev' }}
+                ← {{ prevChapter ? prevChapter.title_translated || prevChapter.title : t('reader.prev') }}
               </button>
               <button
                 class="rounded border px-3 py-2 text-right disabled:opacity-30"
@@ -476,14 +485,14 @@ onBeforeUnmount(() => {
                 :disabled="!nextChapter"
                 @click="goTo(nextChapter)"
               >
-                {{ nextChapter ? nextChapter.title_translated || nextChapter.title : 'Next' }} →
+                {{ nextChapter ? nextChapter.title_translated || nextChapter.title : t('reader.next') }} →
               </button>
             </nav>
 
             <p class="mt-4 text-center text-[11px]" :class="themeClass.muted">
-              <span v-if="chapterLoading">memuat…</span>
-              <span v-else-if="savedAt">progres tersimpan {{ savedAt }}</span>
-              <span class="ml-2 opacity-60">← → untuk pindah bab</span>
+              <span v-if="chapterLoading">{{ t('reader.loadingChapter') }}</span>
+              <span v-else-if="savedAt">{{ t('reader.progressSaved', { time: savedAt }) }}</span>
+              <span class="ml-2 opacity-60">{{ t('reader.keyboardHint') }}</span>
             </p>
           </article>
         </template>

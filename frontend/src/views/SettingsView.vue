@@ -2,6 +2,9 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { settingsApi } from '@/api/settings'
 import ModelSelect from '@/components/ModelSelect.vue'
+import { useI18n } from '@/i18n'
+
+const { t } = useI18n()
 
 const meta = ref({ provider_types: [], tasks: [] })
 const providers = ref([])
@@ -71,18 +74,14 @@ function providerById(id) {
 
 //: Short type names keep the routing dropdown readable
 //: ("Kenari (Custom · kenari.id)").
-const SHORT_TYPE_LABELS = {
-  gemini: 'Gemini',
-  openai: 'OpenAI',
-  openrouter: 'OpenRouter',
-  deepseek: 'DeepSeek',
-  anthropic: 'Anthropic',
-  custom: 'Custom',
-  ollama: 'Ollama',
+function shortTypeLabel(type) {
+  const key = `settings.providerTypesShort.${type}`
+  const label = t(key)
+  return label === key ? providerLabel(type) : label
 }
 
 function providerOptionLabel(provider) {
-  const type = SHORT_TYPE_LABELS[provider.provider_type] ?? providerLabel(provider.provider_type)
+  const type = shortTypeLabel(provider.provider_type)
   let host = ''
   try {
     host = new URL(provider.base_url).host
@@ -103,7 +102,16 @@ function fallbackModelsForTask(task) {
 }
 
 function providerLabel(type) {
-  return providerTypes.value.find((item) => item.value === type)?.label ?? type
+  const fallback = providerTypes.value.find((item) => item.value === type)?.label ?? type
+  const key = `settings.providerTypes.${type}`
+  const label = t(key)
+  return label === key ? fallback : label
+}
+
+function taskLabel(task) {
+  const key = `settings.taskNames.${task.task_name}`
+  const label = t(key)
+  return label === key ? task.label : label
 }
 
 function flash(type, text) {
@@ -140,12 +148,14 @@ function onTypeChange() {
   form.base_url = type.default_base_url ?? ''
   if (form.provider_type === 'custom') {
     // Drop the generic label a previous type may have filled in.
-    if (providerTypes.value.some((t) => t.value !== 'custom' && t.label === form.display_name)) {
+    if (
+      providerTypes.value.some((item) => item.value !== 'custom' && item.label === form.display_name)
+    ) {
       form.display_name = ''
     }
     return
   }
-  if (!form.display_name || providerTypes.value.some((t) => t.label === form.display_name)) {
+  if (!form.display_name || providerTypes.value.some((item) => item.label === form.display_name)) {
     form.display_name = type.label
   }
 }
@@ -222,9 +232,9 @@ async function saveScraperSettings() {
     scraperForm.fetch_batch_size = saved.fetch_batch_size
     scraperForm.fetch_delay_seconds = saved.fetch_delay_seconds
     scraperForm.fetch_max_consecutive_errors = saved.fetch_max_consecutive_errors
-    flash('success', 'Scraper settings disimpan.')
+    flash('success', t('settings.scraper.flashSaved'))
   } catch (error) {
-    flash('error', `Gagal menyimpan scraper settings: ${error.message}`)
+    flash('error', t('settings.scraper.flashSaveFailed', { message: error.message }))
   } finally {
     savingScraper.value = false
   }
@@ -232,7 +242,7 @@ async function saveScraperSettings() {
 
 async function saveProvider() {
   if (nameMissing.value) {
-    flash('error', 'Nama provider wajib diisi untuk tipe Custom (mis. Kenari, Groq, Together).')
+    flash('error', t('settings.providers.nameMissing'))
     return
   }
   savingProvider.value = true
@@ -251,25 +261,25 @@ async function saveProvider() {
     const saved = await settingsApi.saveProvider(payload)
     await loadProviders()
     resetForm()
-    flash('success', `Provider "${saved.display_name}" disimpan.`)
+    flash('success', t('settings.providers.flashSaved', { name: saved.display_name }))
   } catch (error) {
-    flash('error', `Gagal menyimpan provider: ${error.message}`)
+    flash('error', t('settings.providers.flashSaveFailed', { message: error.message }))
   } finally {
     savingProvider.value = false
   }
 }
 
 async function removeProvider(provider) {
-  if (!window.confirm(`Hapus provider "${provider.display_name}"?`)) return
+  if (!window.confirm(t('settings.providers.confirmDelete', { name: provider.display_name }))) return
   deletingId.value = provider.id
   try {
     await settingsApi.deleteProvider(provider.id)
     delete testResults[provider.id]
     if (form.id === provider.id) resetForm()
     await Promise.all([loadProviders(), loadTasks()])
-    flash('success', `Provider "${provider.display_name}" dihapus.`)
+    flash('success', t('settings.providers.flashDeleted', { name: provider.display_name }))
   } catch (error) {
-    flash('error', `Gagal menghapus provider: ${error.message}`)
+    flash('error', t('settings.providers.flashDeleteFailed', { message: error.message }))
   } finally {
     deletingId.value = null
   }
@@ -298,13 +308,19 @@ async function syncModels(provider) {
     await loadProviders()
     syncResults[provider.id] = {
       ok: true,
-      text: `${result.count} model diambil dari provider.`,
+      text: t('settings.providers.syncSaved', { count: result.count }),
     }
     if (form.id === provider.id) form.modelsText = (result.models ?? []).join('\n')
-    flash('success', `${provider.display_name}: ${result.count} model tersimpan.`)
+    flash(
+      'success',
+      t('settings.providers.flashSyncSaved', {
+        name: provider.display_name,
+        count: result.count,
+      }),
+    )
   } catch (error) {
     syncResults[provider.id] = { ok: false, text: error.message }
-    flash('error', `Gagal mengambil daftar model: ${error.message}`)
+    flash('error', t('settings.providers.flashSyncFailed', { message: error.message }))
   } finally {
     syncingId.value = null
   }
@@ -330,7 +346,10 @@ async function saveTask(task) {
       taskSaved[task.task_name] = false
     }, 2500)
   } catch (error) {
-    flash('error', `Gagal menyimpan routing ${task.label}: ${error.message}`)
+    flash(
+      'error',
+      t('settings.tasks.flashSaveFailed', { label: taskLabel(task), message: error.message }),
+    )
   } finally {
     savingTask.value = null
   }
@@ -343,9 +362,15 @@ async function syncForTask(task) {
   try {
     const result = await settingsApi.syncProviderModels(provider.id)
     await loadProviders()
-    flash('success', `${provider.display_name}: ${result.count} model tersimpan.`)
+    flash(
+      'success',
+      t('settings.providers.flashSyncSaved', {
+        name: provider.display_name,
+        count: result.count,
+      }),
+    )
   } catch (error) {
-    flash('error', `Gagal mengambil daftar model: ${error.message}`)
+    flash('error', t('settings.providers.flashSyncFailed', { message: error.message }))
   } finally {
     taskSyncing.value = null
   }
@@ -357,9 +382,9 @@ onMounted(loadAll)
 <template>
   <div class="mx-auto max-w-6xl px-6 py-8">
     <header class="mb-8">
-      <h1 class="text-2xl font-semibold tracking-tight text-white">Settings</h1>
+      <h1 class="text-2xl font-semibold tracking-tight text-strong">{{ t('settings.title') }}</h1>
       <p class="mt-1 text-sm text-slate-400">
-        Kelola kredensial provider LLM dan model yang dipakai untuk tiap proses.
+        {{ t('settings.subtitle') }}
       </p>
     </header>
 
@@ -379,18 +404,20 @@ onMounted(loadAll)
       v-if="loadError"
       class="mb-6 rounded-lg border border-rose-900/60 bg-rose-950/40 px-4 py-3 text-sm text-rose-300"
     >
-      Gagal memuat settings: {{ loadError }}
-      <button class="ml-2 underline" @click="loadAll">coba lagi</button>
+      {{ t('settings.loadError', { message: loadError }) }}
+      <button class="ml-2 underline" @click="loadAll">{{ t('common.actions.retry') }}</button>
     </div>
 
-    <p v-if="loading" class="text-sm text-slate-500">Memuat…</p>
+    <p v-if="loading" class="text-sm text-slate-500">{{ t('common.actions.loading') }}</p>
 
     <template v-else>
       <!-- ============================ PROVIDERS ============================ -->
       <section class="mb-12">
         <div class="mb-4 flex items-baseline justify-between">
-          <h2 class="text-lg font-semibold text-white">LLM Providers</h2>
-          <span class="text-xs text-slate-500">{{ providers.length }} tersimpan</span>
+          <h2 class="text-lg font-semibold text-strong">{{ t('settings.providers.title') }}</h2>
+          <span class="text-xs text-slate-500">
+            {{ t('settings.providers.savedCount', { count: providers.length }) }}
+          </span>
         </div>
 
         <div class="grid gap-6 lg:grid-cols-[minmax(0,400px)_minmax(0,1fr)]">
@@ -398,7 +425,7 @@ onMounted(loadAll)
           <form class="card space-y-4 self-start" @submit.prevent="saveProvider">
             <div class="flex items-center justify-between">
               <h3 class="text-sm font-semibold text-slate-200">
-                {{ isEditing ? 'Edit provider' : 'Tambah provider' }}
+                {{ isEditing ? t('settings.providers.formEdit') : t('settings.providers.formAdd') }}
               </h3>
               <button
                 v-if="isEditing"
@@ -406,12 +433,12 @@ onMounted(loadAll)
                 class="text-xs text-slate-400 underline hover:text-slate-200"
                 @click="resetForm"
               >
-                batal
+                {{ t('common.actions.cancel') }}
               </button>
             </div>
 
             <div>
-              <label class="label" for="provider-type">Provider</label>
+              <label class="label" for="provider-type">{{ t('settings.providers.type') }}</label>
               <select
                 id="provider-type"
                 v-model="form.provider_type"
@@ -419,15 +446,17 @@ onMounted(loadAll)
                 @change="onTypeChange"
               >
                 <option v-for="type in providerTypes" :key="type.value" :value="type.value">
-                  {{ type.label }}
+                  {{ providerLabel(type.value) }}
                 </option>
               </select>
             </div>
 
             <div>
               <label class="label" for="display-name">
-                Nama Provider
-                <span v-if="isCustom" class="normal-case text-rose-400">(wajib)</span>
+                {{ t('settings.providers.name') }}
+                <span v-if="isCustom" class="normal-case text-rose-400">
+                  ({{ t('common.state.required') }})
+                </span>
               </label>
               <input
                 id="display-name"
@@ -437,23 +466,24 @@ onMounted(loadAll)
                 :class="{ '!border-rose-700': nameMissing }"
                 :placeholder="
                   isCustom
-                    ? 'Contoh: Kenari, Groq, DeepSeek'
-                    : (currentType?.label ?? 'Nama provider')
+                    ? t('settings.providers.nameExample')
+                    : (currentType?.label ?? t('settings.providers.namePlaceholder'))
                 "
               />
               <p v-if="nameMissing" class="mt-1 text-[11px] text-rose-400">
-                Beri nama unik agar beberapa provider Custom tetap bisa dibedakan di dropdown
-                routing.
+                {{ t('settings.providers.nameRequiredHint') }}
               </p>
               <p v-else-if="isCustom" class="mt-1 text-[11px] text-slate-500">
-                Tipe Custom bisa dipakai berkali-kali — namai sesuai penyedianya.
+                {{ t('settings.providers.customHint') }}
               </p>
             </div>
 
             <div>
               <label class="label" for="api-key">
-                API Key
-                <span v-if="!keyRequired" class="normal-case text-slate-500">(opsional)</span>
+                {{ t('settings.providers.apiKey') }}
+                <span v-if="!keyRequired" class="normal-case text-slate-500">
+                  ({{ t('common.state.optional') }})
+                </span>
               </label>
               <input
                 id="api-key"
@@ -462,17 +492,18 @@ onMounted(loadAll)
                 type="password"
                 autocomplete="off"
                 :placeholder="
-                  isEditing ? 'Kosongkan untuk mempertahankan key lama' : 'Masukkan API key'
+                  isEditing
+                    ? t('settings.providers.apiKeyPlaceholderEdit')
+                    : t('settings.providers.apiKeyPlaceholder')
                 "
               />
               <p class="mt-1 text-[11px] text-slate-500">
-                Key disimpan lokal di SQLite dan hanya ditampilkan dalam bentuk masking
-                (<code class="text-slate-400">****1234</code>).
+                {{ t('settings.providers.apiKeyHintBefore') }}<code class="text-slate-400">****1234</code>{{ t('settings.providers.apiKeyHintAfter') }}
               </p>
             </div>
 
             <div>
-              <label class="label" for="base-url">Base URL</label>
+              <label class="label" for="base-url">{{ t('settings.providers.baseUrl') }}</label>
               <input
                 id="base-url"
                 v-model="form.base_url"
@@ -481,23 +512,26 @@ onMounted(loadAll)
                 placeholder="https://…"
               />
               <p class="mt-1 text-[11px] text-slate-500">
-                Terisi otomatis sesuai provider, tetap bisa diubah.
+                {{ t('settings.providers.baseUrlHint') }}
               </p>
             </div>
 
             <div>
-              <label class="label" for="models-text">Daftar Model Tersimpan</label>
+              <label class="label" for="models-text">
+                {{ t('settings.providers.modelsLabel') }}
+              </label>
               <textarea
                 id="models-text"
                 v-model="form.modelsText"
                 class="input h-24 resize-y font-mono text-xs"
-                placeholder="Satu model per baris, mis.&#10;gpt-4o-mini&#10;gpt-4o"
+                :placeholder="t('settings.providers.modelsPlaceholder')"
               />
               <p class="mt-1 text-[11px] text-slate-500">
-                Opsional — isi manual (pisahkan baris atau koma) atau ambil otomatis lewat tombol
-                <span class="text-slate-400">Ambil Daftar Model</span> pada kartu provider.
+                {{ t('settings.providers.modelsHintBefore') }}
+                <span class="text-slate-400">{{ t('settings.providers.fetchModels') }}</span>
+                {{ t('settings.providers.modelsHintAfter') }}
                 <span v-if="parseModelText(form.modelsText).length" class="text-slate-400">
-                  ({{ parseModelText(form.modelsText).length }} model)
+                  ({{ t('common.units.models', { count: parseModelText(form.modelsText).length }) }})
                 </span>
               </p>
             </div>
@@ -508,11 +542,17 @@ onMounted(loadAll)
                 type="checkbox"
                 class="h-4 w-4 rounded border-ink-600 bg-ink-850 text-indigo-600 focus:ring-indigo-500"
               />
-              Aktif (bisa dipakai untuk routing)
+              {{ t('settings.providers.enabled') }}
             </label>
 
             <button type="submit" class="btn-primary w-full" :disabled="!canSaveProvider">
-              {{ savingProvider ? 'Menyimpan…' : isEditing ? 'Update provider' : 'Tambah provider' }}
+              {{
+                savingProvider
+                  ? t('common.actions.saving')
+                  : isEditing
+                    ? t('settings.providers.submitUpdate')
+                    : t('settings.providers.formAdd')
+              }}
             </button>
           </form>
 
@@ -522,7 +562,7 @@ onMounted(loadAll)
               v-if="!hasProviders"
               class="rounded-xl border border-dashed border-ink-700 px-5 py-10 text-center text-sm text-slate-500"
             >
-              Belum ada provider. Tambahkan satu di form sebelah kiri.
+              {{ t('settings.providers.empty') }}
             </p>
 
             <article
@@ -548,12 +588,16 @@ onMounted(loadAll)
                           : 'bg-ink-850 text-slate-500'
                       "
                     >
-                      {{ (provider.available_models ?? []).length }} model
+                      {{
+                        t('common.units.models', {
+                          count: (provider.available_models ?? []).length,
+                        })
+                      }}
                     </span>
                     <span
                       v-if="!provider.is_enabled"
                       class="badge bg-amber-950/60 text-amber-400"
-                      >nonaktif</span
+                      >{{ t('settings.providers.disabledBadge') }}</span
                     >
                   </div>
                   <p class="mt-1 font-mono text-[11px] text-slate-500">
@@ -566,35 +610,43 @@ onMounted(loadAll)
                     :disabled="syncingId === provider.id"
                     @click="syncModels(provider)"
                   >
-                    {{ syncingId === provider.id ? 'Mengambil…' : 'Ambil Daftar Model' }}
+                    {{
+                      syncingId === provider.id
+                        ? t('settings.providers.syncing')
+                        : t('settings.providers.fetchModels')
+                    }}
                   </button>
                   <button
                     class="btn-ghost !px-2.5 !py-1 text-xs"
                     :disabled="testingId === provider.id"
                     @click="testProvider(provider)"
                   >
-                    {{ testingId === provider.id ? 'Menguji…' : 'Test Connection' }}
+                    {{
+                      testingId === provider.id
+                        ? t('settings.providers.testing')
+                        : t('settings.providers.test')
+                    }}
                   </button>
                   <button class="btn-ghost !px-2.5 !py-1 text-xs" @click="editProvider(provider)">
-                    Edit
+                    {{ t('common.actions.edit') }}
                   </button>
                   <button
                     class="btn-danger !px-2.5 !py-1 text-xs"
                     :disabled="deletingId === provider.id"
                     @click="removeProvider(provider)"
                   >
-                    Hapus
+                    {{ t('common.actions.delete') }}
                   </button>
                 </div>
               </div>
 
               <div class="flex items-center gap-2 text-xs">
-                <span class="text-slate-500">API key</span>
+                <span class="text-slate-500">{{ t('settings.providers.apiKey') }}</span>
                 <code
                   class="rounded bg-ink-850 px-2 py-0.5 font-mono text-slate-300"
-                  :class="{ 'text-slate-600': !provider.has_api_key }"
+                  :class="{ 'text-slate-500': !provider.has_api_key }"
                 >
-                  {{ provider.api_key || 'belum diisi' }}
+                  {{ provider.api_key || t('settings.providers.apiKeyEmpty') }}
                 </code>
               </div>
 
@@ -620,10 +672,14 @@ onMounted(loadAll)
                 "
               >
                 <span class="font-semibold">
-                  {{ testResults[provider.id].ok ? 'Berhasil' : 'Gagal' }}
+                  {{
+                    testResults[provider.id].ok
+                      ? t('settings.providers.testOk')
+                      : t('settings.providers.testFailed')
+                  }}
                 </span>
                 <span v-if="testResults[provider.id].model" class="text-slate-400">
-                  · model {{ testResults[provider.id].model }}
+                  · {{ t('settings.providers.testModel', { name: testResults[provider.id].model }) }}
                 </span>
                 <br />
                 {{ testResults[provider.id].message }}
@@ -636,8 +692,8 @@ onMounted(loadAll)
       <!-- ============================== TASKS ============================== -->
       <section>
         <div class="mb-4 flex items-baseline justify-between">
-          <h2 class="text-lg font-semibold text-white">Model Routing per Proses</h2>
-          <span class="text-xs text-slate-500">3 slot</span>
+          <h2 class="text-lg font-semibold text-strong">{{ t('settings.tasks.title') }}</h2>
+          <span class="text-xs text-slate-500">{{ t('settings.tasks.slotCount') }}</span>
         </div>
 
         <div class="grid gap-4 md:grid-cols-3">
@@ -649,36 +705,40 @@ onMounted(loadAll)
             @submit.prevent="saveTask(task)"
           >
             <div>
-              <h3 class="text-sm font-semibold text-slate-100">{{ task.label }}</h3>
+              <h3 class="text-sm font-semibold text-slate-100">{{ taskLabel(task) }}</h3>
               <p class="mt-0.5 font-mono text-[11px] text-slate-500">{{ task.task_name }}</p>
             </div>
 
             <div>
-              <label class="label" :for="`provider-${task.task_name}`">Provider</label>
+              <label class="label" :for="`provider-${task.task_name}`">
+                {{ t('settings.tasks.provider') }}
+              </label>
               <select
                 :id="`provider-${task.task_name}`"
                 v-model="taskDrafts[task.task_name].provider_id"
                 class="input"
               >
-                <option :value="null">— belum dipilih —</option>
+                <option :value="null">{{ t('settings.tasks.providerNone') }}</option>
                 <option v-for="provider in providers" :key="provider.id" :value="provider.id">
                   {{ providerOptionLabel(provider) }}
-                  <template v-if="!provider.is_enabled"> (nonaktif)</template>
+                  <template v-if="!provider.is_enabled">
+                    {{ t('settings.tasks.disabledSuffix') }}
+                  </template>
                 </option>
               </select>
             </div>
 
             <div>
-              <label class="label">Model</label>
+              <label class="label">{{ t('settings.tasks.model') }}</label>
               <ModelSelect
                 v-model="taskDrafts[task.task_name].model_name"
                 :models="modelsForTask(task)"
                 :disabled="!taskDrafts[task.task_name].provider_id"
-                placeholder="Pilih atau ketik nama model"
+                :placeholder="t('settings.tasks.modelPlaceholder')"
                 :empty-hint="
                   taskDrafts[task.task_name].provider_id
-                    ? 'Belum ada model tersimpan untuk provider ini. Klik Sync Model, atau ketik nama model manual.'
-                    : 'Pilih provider dulu.'
+                    ? t('settings.tasks.modelEmptyHint')
+                    : t('settings.tasks.modelEmptyHintNoProvider')
                 "
               />
               <div class="mt-2 flex items-center gap-2">
@@ -686,22 +746,27 @@ onMounted(loadAll)
                   type="button"
                   class="btn-ghost !px-2.5 !py-1 text-[11px]"
                   :disabled="
-                    !taskDrafts[task.task_name].provider_id ||
-                    taskSyncing === task.task_name
+                    !taskDrafts[task.task_name].provider_id || taskSyncing === task.task_name
                   "
                   @click="syncForTask(task)"
                 >
-                  {{ taskSyncing === task.task_name ? 'Mengambil…' : 'Sync Model' }}
+                  {{
+                    taskSyncing === task.task_name
+                      ? t('settings.providers.syncing')
+                      : t('settings.tasks.sync')
+                  }}
                 </button>
                 <span class="text-[11px] text-slate-500">
-                  {{ modelsForTask(task).length }} model tersimpan
+                  {{ t('settings.tasks.modelsSaved', { count: modelsForTask(task).length }) }}
                 </span>
               </div>
             </div>
 
             <div class="grid grid-cols-2 gap-3">
               <div>
-                <label class="label" :for="`temp-${task.task_name}`">Temperature</label>
+                <label class="label" :for="`temp-${task.task_name}`">
+                  {{ t('settings.tasks.temperature') }}
+                </label>
                 <input
                   :id="`temp-${task.task_name}`"
                   v-model.number="taskDrafts[task.task_name].temperature"
@@ -713,7 +778,9 @@ onMounted(loadAll)
                 />
               </div>
               <div>
-                <label class="label" :for="`tokens-${task.task_name}`">Max tokens</label>
+                <label class="label" :for="`tokens-${task.task_name}`">
+                  {{ t('settings.tasks.maxTokens') }}
+                </label>
                 <input
                   :id="`tokens-${task.task_name}`"
                   v-model.number="taskDrafts[task.task_name].max_tokens"
@@ -727,36 +794,42 @@ onMounted(loadAll)
 
             <div class="rounded-lg border border-ink-800/80 bg-ink-950/40 p-3 space-y-2.5">
               <div>
-                <p class="text-xs font-medium text-slate-300">Model Cadangan (Fallback)</p>
+                <p class="text-xs font-medium text-slate-300">
+                  {{ t('settings.tasks.fallbackTitle') }}
+                </p>
                 <p class="text-[11px] text-slate-500">
-                  Opsional — dipakai otomatis jika model utama gagal, kosong, atau menolak konten.
+                  {{ t('settings.tasks.fallbackHint') }}
                 </p>
               </div>
               <div>
-                <label class="label" :for="`fb-provider-${task.task_name}`">Provider Cadangan</label>
+                <label class="label" :for="`fb-provider-${task.task_name}`">
+                  {{ t('settings.tasks.fallbackProvider') }}
+                </label>
                 <select
                   :id="`fb-provider-${task.task_name}`"
                   v-model="taskDrafts[task.task_name].fallback_provider_id"
                   class="input"
                 >
-                  <option :value="null">— tidak pakai fallback —</option>
+                  <option :value="null">{{ t('settings.tasks.fallbackNone') }}</option>
                   <option v-for="provider in providers" :key="provider.id" :value="provider.id">
                     {{ providerOptionLabel(provider) }}
-                    <template v-if="!provider.is_enabled"> (nonaktif)</template>
+                    <template v-if="!provider.is_enabled">
+                      {{ t('settings.tasks.disabledSuffix') }}
+                    </template>
                   </option>
                 </select>
               </div>
               <div>
-                <label class="label">Model Cadangan</label>
+                <label class="label">{{ t('settings.tasks.fallbackModel') }}</label>
                 <ModelSelect
                   v-model="taskDrafts[task.task_name].fallback_model_name"
                   :models="fallbackModelsForTask(task)"
                   :disabled="!taskDrafts[task.task_name].fallback_provider_id"
-                  placeholder="Pilih atau ketik nama model cadangan"
+                  :placeholder="t('settings.tasks.fallbackPlaceholder')"
                   :empty-hint="
                     taskDrafts[task.task_name].fallback_provider_id
-                      ? 'Belum ada model tersimpan. Klik Sync Model di atas, atau ketik manual.'
-                      : 'Pilih provider cadangan dulu.'
+                      ? t('settings.tasks.fallbackEmptyHint')
+                      : t('settings.tasks.fallbackEmptyHintNoProvider')
                   "
                 />
               </div>
@@ -764,16 +837,17 @@ onMounted(loadAll)
 
             <div class="mt-auto flex items-center gap-3">
               <button type="submit" class="btn-primary" :disabled="savingTask === task.task_name">
-                {{ savingTask === task.task_name ? 'Menyimpan…' : 'Save' }}
+                {{
+                  savingTask === task.task_name
+                    ? t('common.actions.saving')
+                    : t('common.actions.save')
+                }}
               </button>
               <span v-if="taskSaved[task.task_name]" class="text-xs text-emerald-400">
-                tersimpan ✓
+                {{ t('settings.tasks.saved') }}
               </span>
-              <span
-                v-else-if="!task.provider_id"
-                class="text-xs text-amber-500/80"
-              >
-                belum dikonfigurasi
+              <span v-else-if="!task.provider_id" class="text-xs text-amber-500/80">
+                {{ t('settings.tasks.notConfigured') }}
               </span>
             </div>
           </form>
@@ -783,14 +857,14 @@ onMounted(loadAll)
       <!-- ========================= SCRAPER SETTINGS ========================= -->
       <section class="mt-12">
         <div class="mb-4 flex items-baseline justify-between">
-          <h2 class="text-lg font-semibold text-white">Scraper Settings</h2>
-          <span class="text-xs text-slate-500">dipakai oleh Fetch Batch di Workspace</span>
+          <h2 class="text-lg font-semibold text-strong">{{ t('settings.scraper.title') }}</h2>
+          <span class="text-xs text-slate-500">{{ t('settings.scraper.subtitle') }}</span>
         </div>
 
         <form class="card space-y-4" @submit.prevent="saveScraperSettings">
           <div class="grid gap-4 sm:grid-cols-3">
             <div>
-              <label class="label" for="fetch-batch">Batch Size Default</label>
+              <label class="label" for="fetch-batch">{{ t('settings.scraper.batchSize') }}</label>
               <input
                 id="fetch-batch"
                 v-model.number="scraperForm.fetch_batch_size"
@@ -800,10 +874,12 @@ onMounted(loadAll)
                 max="500"
                 step="1"
               />
-              <p class="mt-1 text-[11px] text-slate-500">1–500 bab per klik Fetch Batch.</p>
+              <p class="mt-1 text-[11px] text-slate-500">
+                {{ t('settings.scraper.batchSizeHint') }}
+              </p>
             </div>
             <div>
-              <label class="label" for="fetch-delay">Jeda antar bab (detik)</label>
+              <label class="label" for="fetch-delay">{{ t('settings.scraper.delay') }}</label>
               <input
                 id="fetch-delay"
                 v-model.number="scraperForm.fetch_delay_seconds"
@@ -814,11 +890,11 @@ onMounted(loadAll)
                 step="0.1"
               />
               <p class="mt-1 text-[11px] text-slate-500">
-                Beri jeda agar situs sumber tidak memblokir (403/429).
+                {{ t('settings.scraper.delayHint') }}
               </p>
             </div>
             <div>
-              <label class="label" for="fetch-errors">Batas error beruntun</label>
+              <label class="label" for="fetch-errors">{{ t('settings.scraper.maxErrors') }}</label>
               <input
                 id="fetch-errors"
                 v-model.number="scraperForm.fetch_max_consecutive_errors"
@@ -829,17 +905,17 @@ onMounted(loadAll)
                 step="1"
               />
               <p class="mt-1 text-[11px] text-slate-500">
-                Job fetch berhenti otomatis setelah N error berturut-turut.
+                {{ t('settings.scraper.maxErrorsHint') }}
               </p>
             </div>
           </div>
 
           <div class="flex flex-wrap items-center gap-3">
             <button type="submit" class="btn-primary" :disabled="savingScraper">
-              {{ savingScraper ? 'Menyimpan…' : 'Simpan' }}
+              {{ savingScraper ? t('common.actions.saving') : t('common.actions.save') }}
             </button>
             <span class="text-[11px] text-slate-500">
-              Perubahan berlaku untuk job fetch berikutnya.
+              {{ t('settings.scraper.note') }}
             </span>
           </div>
         </form>

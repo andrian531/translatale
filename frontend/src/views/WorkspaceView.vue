@@ -5,6 +5,9 @@ import { novelsApi } from '@/api/novels'
 import { readerApi } from '@/api/reader'
 import { settingsApi } from '@/api/settings'
 import { translationApi } from '@/api/translation'
+import { useI18n } from '@/i18n'
+
+const { t } = useI18n()
 
 const route = useRoute()
 const router = useRouter()
@@ -78,12 +81,12 @@ const uploading = ref(false)
 const fileInput = ref(null)
 
 const filters = [
-  { value: 'all', label: 'Semua' },
-  { value: 'pending_fetch', label: 'Pending Fetch' },
-  { value: 'raw', label: 'Raw' },
-  { value: 'translating', label: 'Translating' },
-  { value: 'translated', label: 'Translated' },
-  { value: 'error', label: 'Error' },
+  { value: 'all', labelKey: 'workspace.filters.all' },
+  { value: 'pending_fetch', labelKey: 'common.status.pending_fetch' },
+  { value: 'raw', labelKey: 'common.status.raw' },
+  { value: 'translating', labelKey: 'common.status.translating' },
+  { value: 'translated', labelKey: 'common.status.translated' },
+  { value: 'error', labelKey: 'common.status.error' },
 ]
 
 const statusStyles = {
@@ -150,10 +153,26 @@ const displaySynopsis = computed(() => {
 })
 
 const JOB_LABELS = {
-  translate: 'Translate',
-  story_analysis: 'Analisa Cerita',
-  fetch: 'Fetch Bab',
-  apply_reference: 'Terapkan Referensi',
+  translate: 'common.job.translate',
+  story_analysis: 'common.job.story_analysis',
+  fetch: 'common.job.fetch',
+  apply_reference: 'workspace.job.apply_reference',
+}
+
+const JOB_STATUS_KEYS = {
+  queued: 'common.job.queued',
+  running: 'common.job.running',
+  completed: 'common.job.completed',
+  failed: 'common.job.failed',
+  cancelled: 'common.job.cancelled',
+}
+
+const CHAPTER_STATUS_KEYS = {
+  pending_fetch: 'common.status.pending_fetch',
+  raw: 'common.status.raw',
+  translating: 'common.status.translating',
+  translated: 'common.status.translated',
+  error: 'common.status.error',
 }
 
 const translatedChaptersCount = computed(
@@ -162,7 +181,19 @@ const translatedChaptersCount = computed(
 const applyingReference = ref(false)
 
 function jobLabel(type) {
-  return JOB_LABELS[type] ?? type ?? 'Job'
+  const key = JOB_LABELS[type]
+  if (key) return t(key)
+  return type || t('workspace.job.unknown')
+}
+
+function jobStatusLabel(status) {
+  const key = JOB_STATUS_KEYS[status]
+  return key ? t(key) : status
+}
+
+function chapterStatusLabel(status) {
+  const key = CHAPTER_STATUS_KEYS[status]
+  return key ? t(key) : status
 }
 
 function flash(type, text) {
@@ -206,7 +237,7 @@ async function loadReference() {
     }
     referenceDirty.value = false
   } catch (err) {
-    flash('error', `Gagal memuat reference: ${err.message}`)
+    flash('error', t('workspace.errors.loadReference', { message: err.message }))
   } finally {
     referenceLoading.value = false
   }
@@ -275,16 +306,16 @@ function watchJob(jobId) {
       }
       await Promise.all([load(), loadReference()])
       if (event.type === 'error') {
-        flash('error', `Job gagal: ${event.message}`)
+        flash('error', t('common.job.failedMessage', { message: event.message }))
       } else if (event.type === 'cancelled') {
-        flash('error', 'Job dibatalkan.')
+        flash('error', t('common.job.cancelledMessage'))
       } else {
-        flash('success', 'Job selesai.')
+        flash('success', t('common.job.finished'))
       }
     },
     onError() {
       closeStream = null
-      flash('error', 'Koneksi progres terputus. Muat ulang halaman untuk melihat status.')
+      flash('error', t('common.job.streamLost'))
     },
   })
 }
@@ -302,7 +333,7 @@ async function runTranslateWithIds(ids) {
     watchJob(started.id)
     await load()
   } catch (err) {
-    flash('error', `Gagal memulai translate: ${err.message}`)
+    flash('error', t('workspace.errors.startTranslate', { message: err.message }))
   }
 }
 
@@ -328,7 +359,7 @@ async function startTranslate() {
   )
   const sample = earlierUntranslated
     .slice(0, 5)
-    .map((chapter) => `Bab ${chapter.chapter_number}`)
+    .map((chapter) => t('common.job.chapter', { number: chapter.chapter_number }))
     .join(', ')
   contextWarning.value = {
     minSelectedNo,
@@ -345,7 +376,7 @@ async function confirmTranslateEarlier() {
   contextWarning.value = null
   if (!warn) return
   if (!warn.earlierReadyIds.length) {
-    flash('error', 'Bab sebelumnya masih berstatus pending fetch. Jalankan Fetch Raw terlebih dahulu.')
+    flash('error', t('workspace.errors.earlierPending'))
     return
   }
   const combined = Array.from(new Set([...warn.earlierReadyIds, ...warn.selectedIds]))
@@ -367,7 +398,7 @@ async function startAnalyze() {
     jobMessage.value = started.message
     watchJob(started.id)
   } catch (err) {
-    flash('error', `Gagal memulai analisa: ${err.message}`)
+    flash('error', t('workspace.errors.startAnalyze', { message: err.message }))
   }
 }
 
@@ -377,7 +408,7 @@ async function cancelJob() {
     const updated = await translationApi.cancelJob(job.value.id)
     job.value = updated
   } catch (err) {
-    flash('error', `Gagal membatalkan: ${err.message}`)
+    flash('error', t('workspace.errors.cancelJob', { message: err.message }))
   }
 }
 
@@ -399,7 +430,7 @@ async function startFetch(payload) {
     watchJob(started.id)
     selected.value = []
   } catch (err) {
-    flash('error', `Gagal memulai fetch: ${err.message}`)
+    flash('error', t('workspace.errors.startFetch', { message: err.message }))
   }
 }
 
@@ -418,9 +449,7 @@ async function clearSelectedTranslations() {
   const ids = clearableSelected.value.map((chapter) => chapter.id)
   if (!ids.length) return
   if (
-    !window.confirm(
-      `Hapus hasil terjemahan untuk ${ids.length} bab terpilih? Teks sumber (raw) akan tetap disimpan dan status di-reset ke raw.`,
-    )
+    !window.confirm(t('workspace.confirm.clearSelected', { count: ids.length }))
   ) {
     return
   }
@@ -429,9 +458,9 @@ async function clearSelectedTranslations() {
     const res = await novelsApi.clearTranslations(novelId.value, ids)
     selected.value = []
     await load()
-    flash('success', `Terjemahan ${res.cleared} bab dihapus (teks raw tetap aman).`)
+    flash('success', t('workspace.notices.clearedSelected', { count: res.cleared }))
   } catch (err) {
-    flash('error', `Gagal menghapus terjemahan: ${err.message}`)
+    flash('error', t('workspace.errors.clearTranslations', { message: err.message }))
   } finally {
     clearing.value = false
   }
@@ -439,9 +468,7 @@ async function clearSelectedTranslations() {
 
 async function clearSingleTranslation(chapter) {
   if (
-    !window.confirm(
-      `Hapus hasil terjemahan Bab ${chapter.chapter_number}? Teks sumber (raw) akan tetap disimpan.`,
-    )
+    !window.confirm(t('workspace.confirm.clearSingle', { number: chapter.chapter_number }))
   ) {
     return
   }
@@ -449,9 +476,9 @@ async function clearSingleTranslation(chapter) {
   try {
     await novelsApi.clearTranslations(novelId.value, [chapter.id])
     await load()
-    flash('success', `Terjemahan Bab ${chapter.chapter_number} dihapus.`)
+    flash('success', t('workspace.notices.clearedSingle', { number: chapter.chapter_number }))
   } catch (err) {
-    flash('error', `Gagal menghapus terjemahan: ${err.message}`)
+    flash('error', t('workspace.errors.clearTranslations', { message: err.message }))
   } finally {
     clearing.value = false
   }
@@ -484,9 +511,9 @@ async function saveSynopsisEdit() {
       synopsis_translated: synopsisDraft.value,
     })
     editingSynopsis.value = false
-    flash('success', 'Sinopsis disimpan.')
+    flash('success', t('workspace.notices.synopsisSaved'))
   } catch (err) {
-    flash('error', `Gagal menyimpan sinopsis: ${err.message}`)
+    flash('error', t('workspace.errors.saveSynopsis', { message: err.message }))
   } finally {
     savingSynopsis.value = false
   }
@@ -497,9 +524,9 @@ async function runRefineSynopsis() {
   try {
     novel.value = await novelsApi.refineSynopsis(novelId.value)
     synopsisExpanded.value = true
-    flash('success', 'Sinopsis diperbaiki memakai konteks cerita.')
+    flash('success', t('workspace.notices.synopsisRefined'))
   } catch (err) {
-    flash('error', `Gagal memperbaiki sinopsis: ${err.message}`)
+    flash('error', t('workspace.errors.refineSynopsis', { message: err.message }))
   } finally {
     refiningSynopsis.value = false
   }
@@ -517,13 +544,13 @@ async function addFromUrls() {
     const result = await novelsApi.addChaptersFromUrl(novelId.value, urls)
     showUrlModal.value = false
     await load()
-    const parts = [`${result.added} bab ditambahkan`]
-    if (result.skipped) parts.push(`${result.skipped} duplikat dilewati`)
-    if (result.failed) parts.push(`${result.failed} gagal`)
+    const parts = [t('workspace.notices.urlsAdded', { count: result.added })]
+    if (result.skipped) parts.push(t('workspace.notices.urlsSkipped', { count: result.skipped }))
+    if (result.failed) parts.push(t('workspace.notices.urlsFailed', { count: result.failed }))
     const detail = result.errors?.[0]?.error ? ` — ${result.errors[0].error}` : ''
     flash(result.failed ? 'error' : 'success', parts.join(', ') + detail)
   } catch (err) {
-    flash('error', `Gagal menambah bab dari URL: ${err.message}`)
+    flash('error', t('workspace.errors.addFromUrls', { message: err.message }))
   } finally {
     savingUrls.value = false
   }
@@ -537,11 +564,11 @@ async function syncFromSource() {
     flash(
       'success',
       result.added
-        ? `${result.added} bab baru ditambahkan (${result.skipped} sudah ada).`
-        : `Tidak ada bab baru — ${result.found ?? 0} bab di sumber sudah ada semua.`,
+        ? t('workspace.notices.syncAdded', { added: result.added, skipped: result.skipped })
+        : t('workspace.notices.syncNone', { found: result.found ?? 0 }),
     )
   } catch (err) {
-    flash('error', `Gagal cek bab baru: ${err.message}`)
+    flash('error', t('workspace.errors.sync', { message: err.message }))
   } finally {
     syncingUrl.value = false
   }
@@ -565,9 +592,9 @@ async function saveManual() {
     })
     showManual.value = false
     await load()
-    flash('success', 'Bab manual ditambahkan.')
+    flash('success', t('workspace.notices.manualAdded'))
   } catch (err) {
-    flash('error', `Gagal menambah bab: ${err.message}`)
+    flash('error', t('workspace.errors.addManual', { message: err.message }))
   } finally {
     savingManual.value = false
   }
@@ -585,9 +612,9 @@ async function onFilesChosen(event) {
   try {
     const created = await novelsApi.uploadChapters(novelId.value, files)
     await load()
-    flash('success', `${created.length} bab diunggah.`)
+    flash('success', t('workspace.notices.uploaded', { count: created.length }))
   } catch (err) {
-    flash('error', `Gagal upload: ${err.message}`)
+    flash('error', t('workspace.errors.upload', { message: err.message }))
   } finally {
     uploading.value = false
   }
@@ -628,9 +655,9 @@ async function downloadExport(format) {
     link.click()
     link.remove()
     URL.revokeObjectURL(url)
-    flash('success', `Export .${format} diunduh.`)
+    flash('success', t('workspace.notices.exported', { format }))
   } catch (err) {
-    flash('error', `Gagal export .${format}: ${err.message}`)
+    flash('error', t('workspace.errors.export', { format, message: err.message }))
   }
 }
 
@@ -645,22 +672,22 @@ async function saveChapter() {
     })
     editing.value = null
     await load()
-    flash('success', 'Bab disimpan.')
+    flash('success', t('workspace.notices.chapterSaved'))
   } catch (err) {
-    flash('error', `Gagal menyimpan bab: ${err.message}`)
+    flash('error', t('workspace.errors.saveChapter', { message: err.message }))
   } finally {
     savingEdit.value = false
   }
 }
 
 async function removeChapter(chapter) {
-  if (!window.confirm(`Hapus bab "${chapter.title}"?`)) return
+  if (!window.confirm(t('workspace.confirm.removeChapter', { title: chapter.title }))) return
   try {
     await novelsApi.removeChapter(chapter.id)
     await load()
-    flash('success', 'Bab dihapus.')
+    flash('success', t('workspace.notices.chapterRemoved'))
   } catch (err) {
-    flash('error', `Gagal menghapus bab: ${err.message}`)
+    flash('error', t('workspace.errors.removeChapter', { message: err.message }))
   }
 }
 
@@ -691,7 +718,7 @@ function saveCharacterModal() {
   const modal = characterModal.value
   if (!modal) return
   if (!modal.name.trim() && !modal.romanized_name.trim()) {
-    flash('error', 'Isi minimal Nama (sumber) atau Nama Romanisasi.')
+    flash('error', t('workspace.errors.characterNameRequired'))
     return
   }
   const entry = {
@@ -776,9 +803,9 @@ async function saveReference() {
       chapter_context: saved.chapter_context ?? [],
     }
     referenceDirty.value = false
-    flash('success', 'Reference disimpan.')
+    flash('success', t('workspace.notices.referenceSaved'))
   } catch (err) {
-    flash('error', `Gagal menyimpan reference: ${err.message}`)
+    flash('error', t('workspace.errors.saveReference', { message: err.message }))
   } finally {
     savingReference.value = false
   }
@@ -786,12 +813,12 @@ async function saveReference() {
 
 async function applyReferenceToTranslated() {
   if (!translatedChaptersCount.value) {
-    flash('error', 'Belum ada bab yang sudah diterjemahkan.')
+    flash('error', t('workspace.errors.noTranslatedChapters'))
     return
   }
   if (
     !window.confirm(
-      `Terapkan nama karakter, lokasi, dan glossary terbaru ke ${translatedChaptersCount.value} bab yang sudah diterjemahkan?`,
+      t('workspace.confirm.applyReference', { count: translatedChaptersCount.value }),
     )
   ) {
     return
@@ -806,7 +833,7 @@ async function applyReferenceToTranslated() {
     jobMessage.value = started.message
     watchJob(started.id)
   } catch (err) {
-    flash('error', `Gagal menerapkan referensi: ${err.message}`)
+    flash('error', t('workspace.errors.applyReference', { message: err.message }))
   } finally {
     applyingReference.value = false
   }
@@ -834,10 +861,10 @@ onBeforeUnmount(stopStream)
 <template>
   <div class="mx-auto max-w-6xl px-6 py-8">
     <button class="mb-4 text-xs text-slate-400 hover:text-slate-200" @click="router.push('/library')">
-      ← Library
+      ← {{ t('workspace.backToLibrary') }}
     </button>
 
-    <p v-if="loading" class="text-sm text-slate-500">Memuat…</p>
+    <p v-if="loading" class="text-sm text-slate-500">{{ t('common.actions.loading') }}</p>
 
     <div
       v-else-if="error"
@@ -850,17 +877,19 @@ onBeforeUnmount(stopStream)
       <header class="mb-5">
         <div class="flex flex-wrap items-start justify-between gap-3">
           <div class="min-w-0 flex-1">
-            <h1 class="text-2xl font-semibold tracking-tight text-white">
+            <h1 class="text-2xl font-semibold tracking-tight text-strong">
               {{ novel.title_translated || novel.title }}
             </h1>
             <p class="mt-1 text-sm text-slate-400">
-              {{ novel.author || 'Penulis tidak diketahui' }} ·
+              {{ novel.author || t('workspace.unknownAuthor') }} ·
               <span class="font-mono text-xs">{{ novel.source_lang }} → {{ novel.target_lang }}</span>
             </p>
             <div
               class="mt-2 rounded-lg border border-ink-800/80 bg-ink-900/50 px-3 py-2 text-[11px] text-slate-400"
             >
-              <span class="font-semibold uppercase tracking-wider text-slate-500">Sumber:</span>
+              <span class="font-semibold uppercase tracking-wider text-slate-500">
+                {{ t('workspace.source') }}
+              </span>
               <span class="ml-1.5 text-slate-300">{{ novel.title }}</span>
               <span v-if="novel.scraper_name" class="ml-2 font-mono text-slate-500">
                 ({{ novel.scraper_name }})
@@ -879,15 +908,23 @@ onBeforeUnmount(stopStream)
                   : 'bg-ink-800 text-slate-400'
               "
             >
-              {{ novel.source_type === 'scraper' ? 'Scraper' : 'Manual' }}
+              {{
+                novel.source_type === 'scraper'
+                  ? t('workspace.sourceType.scraper')
+                  : t('workspace.sourceType.manual')
+              }}
             </span>
-            <span class="badge bg-ink-800 text-slate-300">{{ novel.chapter_count }} bab</span>
-            <span class="badge bg-emerald-950/50 text-emerald-400">{{ novel.raw_count }} raw</span>
+            <span class="badge bg-ink-800 text-slate-300">
+              {{ t('common.units.chapters', { count: novel.chapter_count }) }}
+            </span>
+            <span class="badge bg-emerald-950/50 text-emerald-400">
+              {{ t('workspace.counts.raw', { count: novel.raw_count }) }}
+            </span>
             <span class="badge bg-sky-950/50 text-sky-400">
-              {{ novel.translated_count }} translated
+              {{ t('workspace.counts.translated', { count: novel.translated_count }) }}
             </span>
             <span v-if="novel.pending_count" class="badge bg-amber-950/50 text-amber-400">
-              {{ novel.pending_count }} pending
+              {{ t('workspace.counts.pending', { count: novel.pending_count }) }}
             </span>
           </div>
         </div>
@@ -896,16 +933,20 @@ onBeforeUnmount(stopStream)
           <button
             class="btn-primary !px-3 !py-1.5 text-xs"
             :disabled="!novel.translated_count"
-            :title="novel.translated_count ? 'Buka reader' : 'Belum ada bab terjemahan'"
+            :title="
+              novel.translated_count
+                ? t('workspace.tooltips.openReader')
+                : t('workspace.tooltips.noTranslatedChapters')
+            "
             @click="openReader()"
           >
-            Baca
+            {{ t('workspace.actions.read') }}
           </button>
           <button class="btn-ghost !px-3 !py-1.5 text-xs" @click="downloadExport('txt')">
-            Export (.txt)
+            {{ t('workspace.actions.exportTxt') }}
           </button>
           <button class="btn-ghost !px-3 !py-1.5 text-xs" @click="downloadExport('json')">
-            Backup (.json)
+            {{ t('workspace.actions.backupJson') }}
           </button>
         </div>
       </header>
@@ -914,19 +955,19 @@ onBeforeUnmount(stopStream)
       <section class="card mb-5">
         <div class="flex flex-wrap items-start justify-between gap-3">
           <div class="min-w-0 flex-1">
-            <h2 class="flex flex-wrap items-center gap-2 text-sm font-semibold text-white">
-              Sinopsis
+            <h2 class="flex flex-wrap items-center gap-2 text-sm font-semibold text-strong">
+              {{ t('workspace.synopsis.title') }}
               <span
                 v-if="novel.synopsis_translated"
                 class="badge bg-emerald-950/50 text-emerald-400"
               >
-                terjemahan
+                {{ t('workspace.synopsis.translatedBadge') }}
               </span>
               <span
                 v-else-if="novel.synopsis"
                 class="badge bg-amber-950/50 text-amber-400"
               >
-                belum diterjemahkan
+                {{ t('workspace.synopsis.untranslatedBadge') }}
               </span>
             </h2>
             <p
@@ -936,7 +977,7 @@ onBeforeUnmount(stopStream)
             >
               {{ displaySynopsis }}
             </p>
-            <p v-else class="mt-1 text-xs text-slate-500">Novel ini belum punya sinopsis.</p>
+            <p v-else class="mt-1 text-xs text-slate-500">{{ t('workspace.synopsis.empty') }}</p>
           </div>
 
           <div class="flex flex-wrap items-center gap-2">
@@ -945,41 +986,43 @@ onBeforeUnmount(stopStream)
               class="btn-ghost !px-2.5 !py-1 text-[11px]"
               @click="synopsisExpanded = !synopsisExpanded"
             >
-              {{ synopsisExpanded ? 'Ringkas' : 'Baca semua' }}
+              {{ synopsisExpanded ? t('workspace.synopsis.collapse') : t('workspace.synopsis.expand') }}
             </button>
             <button
               v-if="novel.synopsis"
               class="btn-ghost !px-2.5 !py-1 text-[11px]"
               @click="showRawSynopsis = !showRawSynopsis"
             >
-              {{ showRawSynopsis ? 'Sembunyikan asli' : 'Lihat asli' }}
+              {{ showRawSynopsis ? t('workspace.synopsis.hideOriginal') : t('workspace.synopsis.showOriginal') }}
             </button>
             <button class="btn-ghost !px-2.5 !py-1 text-[11px]" @click="startEditSynopsis">
-              Edit
+              {{ t('common.actions.edit') }}
             </button>
             <button
               class="btn-primary !px-2.5 !py-1 text-[11px]"
               :disabled="!novel.has_story_analysis || refiningSynopsis"
               :title="
                 novel.has_story_analysis
-                  ? 'Perbaiki tata bahasa sinopsis memakai istilah dari Analisa Cerita'
-                  : 'Jalankan Analisa Cerita terlebih dahulu'
+                  ? t('workspace.tooltips.refineSynopsis')
+                  : t('workspace.tooltips.runAnalysisFirst')
               "
               @click="runRefineSynopsis"
             >
-              {{ refiningSynopsis ? 'Memperbaiki…' : 'Perbaiki Sinopsis' }}
+              {{ refiningSynopsis ? t('workspace.synopsis.refining') : t('workspace.synopsis.refine') }}
             </button>
           </div>
         </div>
 
         <p v-if="!novel.has_story_analysis" class="mt-2 text-[11px] text-amber-500/80">
-          <span class="font-medium text-amber-400">Perbaiki Sinopsis</span> aktif setelah
-          <span class="text-amber-400">Analisa Cerita (AI)</span> dijalankan.
+          <span class="font-medium text-amber-400">{{ t('workspace.synopsis.refine') }}</span>
+          {{ t('workspace.synopsis.refineHintA') }}
+          <span class="text-amber-400">{{ t('workspace.actions.analyze') }}</span>
+          {{ t('workspace.synopsis.refineHintB') }}
         </p>
 
         <div v-if="showRawSynopsis" class="mt-3 rounded-lg border border-ink-800 bg-ink-850 p-3">
           <p class="mb-1 text-[11px] uppercase tracking-wide text-slate-500">
-            Sinopsis asli ({{ novel.source_lang }})
+            {{ t('workspace.synopsis.originalTitle', { lang: novel.source_lang }) }}
           </p>
           <p class="whitespace-pre-line text-xs leading-relaxed text-slate-400">
             {{ novel.synopsis || '—' }}
@@ -987,26 +1030,26 @@ onBeforeUnmount(stopStream)
         </div>
 
         <div v-if="editingSynopsis" class="mt-3 space-y-2">
-          <label class="label" for="synopsis-edit">Edit sinopsis terjemahan</label>
+          <label class="label" for="synopsis-edit">{{ t('workspace.synopsis.editLabel') }}</label>
           <textarea
             id="synopsis-edit"
             v-model="synopsisDraft"
             class="input h-32 resize-y text-xs"
-            placeholder="Tulis sinopsis terjemahan…"
+            :placeholder="t('workspace.synopsis.editPlaceholder')"
           />
           <div class="flex justify-end gap-2">
             <button
               class="btn-ghost !px-2.5 !py-1 text-[11px]"
               @click="editingSynopsis = false"
             >
-              Batal
+              {{ t('common.actions.cancel') }}
             </button>
             <button
               class="btn-primary !px-2.5 !py-1 text-[11px]"
               :disabled="savingSynopsis"
               @click="saveSynopsisEdit"
             >
-              {{ savingSynopsis ? 'Menyimpan…' : 'Simpan Sinopsis' }}
+              {{ savingSynopsis ? t('common.actions.saving') : t('workspace.synopsis.save') }}
             </button>
           </div>
         </div>
@@ -1018,28 +1061,33 @@ onBeforeUnmount(stopStream)
           class="px-4 py-2 text-sm font-medium"
           :class="
             tab === 'chapters'
-              ? 'border-b-2 border-indigo-500 text-white'
+              ? 'border-b-2 border-indigo-500 text-strong'
               : 'text-slate-400 hover:text-slate-200'
           "
           @click="tab = 'chapters'"
         >
-          Chapters
+          {{ t('workspace.tabs.chapters') }}
         </button>
         <button
           class="px-4 py-2 text-sm font-medium"
           :class="
             tab === 'reference'
-              ? 'border-b-2 border-indigo-500 text-white'
+              ? 'border-b-2 border-indigo-500 text-strong'
               : 'text-slate-400 hover:text-slate-200'
           "
           @click="tab = 'reference'"
         >
-          Story &amp; Reference
+          {{ t('workspace.tabs.reference') }}
           <span
             v-if="reference?.characters?.length || reference?.terms?.length"
             class="ml-1 text-[11px] text-slate-500"
           >
-            ({{ reference.characters.length }} karakter, {{ reference.terms.length }} istilah)
+            {{
+              t('workspace.tabs.referenceCounts', {
+                characters: reference.characters.length,
+                terms: reference.terms.length,
+              })
+            }}
           </span>
         </button>
       </div>
@@ -1072,12 +1120,14 @@ onBeforeUnmount(stopStream)
           <span class="font-medium text-slate-100">
             {{ jobLabel(job.job_type) }}
           </span>
-          <span class="badge bg-ink-800 text-slate-300">{{ job.status }}</span>
+          <span class="badge bg-ink-800 text-slate-300">{{ jobStatusLabel(job.status) }}</span>
           <span class="text-xs text-slate-400">
-            {{ job.completed_items }}/{{ job.total_items }}
+            {{
+              t('common.job.progress', { done: job.completed_items, total: job.total_items })
+            }}
           </span>
           <span v-if="jobChunk" class="text-xs text-slate-500">
-            chunk {{ jobChunk.index }}/{{ jobChunk.total }}
+            {{ t('common.job.chunk', { index: jobChunk.index, total: jobChunk.total }) }}
           </span>
           <div class="ml-auto flex gap-2">
             <button
@@ -1085,10 +1135,10 @@ onBeforeUnmount(stopStream)
               class="btn-danger !px-2.5 !py-1 text-xs"
               @click="cancelJob"
             >
-              Cancel
+              {{ t('common.job.cancel') }}
             </button>
             <button v-else class="btn-ghost !px-2.5 !py-1 text-xs" @click="dismissJob">
-              Tutup
+              {{ t('common.job.close') }}
             </button>
           </div>
         </div>
@@ -1110,8 +1160,12 @@ onBeforeUnmount(stopStream)
         >
           <div v-for="(event, index) in jobEvents.slice(-12)" :key="index">
             <span class="text-slate-600">{{ event.type }}</span>
-            <span v-if="event.chapter_number"> · bab {{ event.chapter_number }}</span>
-            <span v-if="event.chunk_index"> · chunk {{ event.chunk_index }}/{{ event.chunk_total }}</span>
+            <span v-if="event.chapter_number">
+              · {{ t('common.job.chapter', { number: event.chapter_number }) }}
+            </span>
+            <span v-if="event.chunk_index">
+              · {{ t('common.job.chunk', { index: event.chunk_index, total: event.chunk_total }) }}
+            </span>
             <span v-if="event.grade"> · {{ event.quality_score }} ({{ event.grade }})</span>
             <span v-if="event.message"> — {{ event.message }}</span>
           </div>
@@ -1126,24 +1180,24 @@ onBeforeUnmount(stopStream)
             :disabled="!translatableSelected.length || jobActive"
             @click="startTranslate"
           >
-            Translate Terpilih ({{ translatableSelected.length }})
+            {{ t('workspace.actions.translateSelected', { count: translatableSelected.length }) }}
           </button>
           <button
             class="btn-danger"
             :disabled="!clearableSelected.length || jobActive || clearing"
-            title="Hapus hasil terjemahan bab terpilih tanpa menghapus teks raw"
+            :title="t('workspace.tooltips.clearSelected')"
             @click="clearSelectedTranslations"
           >
-            Hapus Terjemahan ({{ clearableSelected.length }})
+            {{ t('workspace.actions.clearTranslations', { count: clearableSelected.length }) }}
           </button>
           <button class="btn-ghost" :disabled="jobActive" @click="startAnalyze">
-            Analisa Cerita (AI)
+            {{ t('workspace.actions.analyze') }}
           </button>
 
           <label
             class="flex cursor-pointer select-none items-center gap-1.5 rounded-lg border border-ink-700 bg-ink-850 px-2.5 py-1.5 text-[11px] text-slate-300"
             for="auto-update-reference"
-            title="Deteksi karakter, lokasi & istilah baru otomatis sebelum menerjemahkan tiap bab memakai model Analisa Cerita"
+            :title="t('workspace.tooltips.autoReference')"
           >
             <input
               id="auto-update-reference"
@@ -1151,7 +1205,7 @@ onBeforeUnmount(stopStream)
               type="checkbox"
               class="h-3.5 w-3.5 accent-indigo-500"
             />
-            Auto-update referensi
+            {{ t('workspace.actions.autoReference') }}
           </label>
 
           <span class="mx-1 h-5 w-px self-center bg-ink-700" />
@@ -1161,36 +1215,44 @@ onBeforeUnmount(stopStream)
             :disabled="jobActive || fetching || !novel.pending_count"
             :title="
               novel.pending_count
-                ? `Fetch ${Math.min(fetchBatchSize, novel.pending_count)} bab pending berikutnya`
-                : 'Tidak ada bab pending_fetch'
+                ? t('workspace.tooltips.fetchBatch', {
+                    count: Math.min(fetchBatchSize, novel.pending_count),
+                  })
+                : t('workspace.tooltips.noPending')
             "
             @click="fetchBatch"
           >
-            Fetch Batch ({{ Math.min(fetchBatchSize, novel.pending_count || 0) }} bab)
+            {{
+              t('workspace.actions.fetchBatch', {
+                count: Math.min(fetchBatchSize, novel.pending_count || 0),
+              })
+            }}
           </button>
           <button
             class="btn-ghost"
             :disabled="jobActive || fetching || !pendingSelected.length"
             @click="fetchSelected"
           >
-            Fetch Terpilih ({{ pendingSelected.length }})
+            {{ t('workspace.actions.fetchSelected', { count: pendingSelected.length }) }}
           </button>
-          <button class="btn-ghost" @click="openUrlModal">+ Bab dari URL</button>
+          <button class="btn-ghost" @click="openUrlModal">
+            {{ t('workspace.actions.addFromUrl') }}
+          </button>
           <button
             v-if="novel.source_url"
             class="btn-ghost"
             :disabled="jobActive || syncingUrl"
-            title="Bandingkan daftar bab di situs sumber dengan yang ada di sini"
+            :title="t('workspace.tooltips.sync')"
             @click="syncFromSource"
           >
-            {{ syncingUrl ? 'Mengecek…' : 'Cek Bab Baru (Sync URL)' }}
+            {{ syncingUrl ? t('workspace.actions.checking') : t('workspace.actions.checkNewChapters') }}
           </button>
 
           <span class="mx-1 h-5 w-px self-center bg-ink-700" />
 
-          <button class="btn-ghost" @click="openManual">+ Bab Manual</button>
+          <button class="btn-ghost" @click="openManual">{{ t('workspace.actions.addManual') }}</button>
           <button class="btn-ghost" :disabled="uploading" @click="pickFiles">
-            {{ uploading ? 'Mengunggah…' : 'Upload .txt' }}
+            {{ uploading ? t('workspace.actions.uploading') : t('workspace.actions.uploadTxt') }}
           </button>
           <input
             ref="fileInput"
@@ -1209,13 +1271,13 @@ onBeforeUnmount(stopStream)
             class="rounded-lg px-3 py-1.5 text-xs font-medium"
             :class="
               filter === item.value
-                ? 'bg-ink-800 text-white'
+                ? 'bg-ink-800 text-strong'
                 : 'text-slate-400 hover:bg-ink-850 hover:text-slate-200'
             "
             @click="filter = item.value"
           >
-            {{ item.label }}
-            <span class="text-slate-500">
+            {{ t(item.labelKey) }}
+            <span class="text-slate-400">
               {{
                 item.value === 'all'
                   ? chapters.length
@@ -1227,7 +1289,7 @@ onBeforeUnmount(stopStream)
 
         <div class="overflow-hidden rounded-xl border border-ink-700">
           <table class="w-full text-left text-sm">
-            <thead class="bg-ink-850 text-[11px] uppercase tracking-wide text-slate-500">
+            <thead class="bg-ink-850 text-[11px] uppercase tracking-wide text-slate-400">
               <tr>
                 <th class="w-10 px-3 py-2">
                   <input
@@ -1238,17 +1300,17 @@ onBeforeUnmount(stopStream)
                   />
                 </th>
                 <th class="w-12 px-3 py-2">#</th>
-                <th class="px-3 py-2">Judul</th>
-                <th class="w-28 px-3 py-2">Status</th>
-                <th class="w-24 px-3 py-2">Quality</th>
-                <th class="w-16 px-3 py-2 text-right">Chars</th>
-                <th class="w-36 px-3 py-2 text-right">Aksi</th>
+                <th class="px-3 py-2">{{ t('workspace.table.title') }}</th>
+                <th class="w-28 px-3 py-2">{{ t('workspace.table.status') }}</th>
+                <th class="w-24 px-3 py-2">{{ t('workspace.table.quality') }}</th>
+                <th class="w-16 px-3 py-2 text-right">{{ t('workspace.table.chars') }}</th>
+                <th class="w-36 px-3 py-2 text-right">{{ t('workspace.table.actions') }}</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-ink-800">
               <tr v-if="!visibleChapters.length">
                 <td colspan="7" class="px-3 py-10 text-center text-sm text-slate-500">
-                  Tidak ada bab pada filter ini.
+                  {{ t('workspace.table.empty') }}
                 </td>
               </tr>
               <tr v-for="chapter in visibleChapters" :key="chapter.id" class="hover:bg-ink-850/60">
@@ -1265,10 +1327,10 @@ onBeforeUnmount(stopStream)
                 </td>
                 <td class="px-3 py-2">
                   <button
-                    class="text-left text-slate-200 hover:text-white hover:underline"
+                    class="text-left text-slate-200 hover:text-strong hover:underline"
                     @click="openChapter(chapter)"
                   >
-                    {{ chapter.title || '(tanpa judul)' }}
+                    {{ chapter.title || t('workspace.table.untitled') }}
                   </button>
                   <p v-if="chapter.title_translated" class="text-[11px] text-slate-500">
                     {{ chapter.title_translated }}
@@ -1279,7 +1341,7 @@ onBeforeUnmount(stopStream)
                     class="badge"
                     :class="statusStyles[chapter.status] ?? 'bg-ink-800 text-slate-400'"
                   >
-                    {{ chapter.status }}
+                    {{ chapterStatusLabel(chapter.status) }}
                   </span>
                 </td>
                 <td class="px-3 py-2">
@@ -1290,7 +1352,7 @@ onBeforeUnmount(stopStream)
                   >
                     {{ Math.round(chapter.quality_score) }} · {{ gradeFor(chapter.quality_score) }}
                   </span>
-                  <span v-else class="text-xs text-slate-600">—</span>
+                  <span v-else class="text-xs text-slate-500">—</span>
                 </td>
                 <td class="px-3 py-2 text-right font-mono text-xs text-slate-500">
                   {{ chapter.raw_content.length }}
@@ -1301,10 +1363,10 @@ onBeforeUnmount(stopStream)
                     class="btn-primary !px-2 !py-0.5 text-[11px]"
                     @click="openReader(chapter.id)"
                   >
-                    Baca
+                    {{ t('workspace.actions.read') }}
                   </button>
                   <button class="btn-ghost !px-2 !py-0.5 text-[11px]" @click="openChapter(chapter)">
-                    Lihat/Edit
+                    {{ t('workspace.actions.viewEdit') }}
                   </button>
                   <button
                     v-if="
@@ -1314,16 +1376,16 @@ onBeforeUnmount(stopStream)
                     "
                     class="btn-ghost ml-1 !px-2 !py-0.5 text-[11px] text-amber-300 hover:text-amber-200"
                     :disabled="jobActive || clearing"
-                    title="Hapus hasil terjemahan bab ini tanpa menghapus teks raw"
+                    :title="t('workspace.tooltips.clearSingle')"
                     @click="clearSingleTranslation(chapter)"
                   >
-                    Reset TL
+                    {{ t('workspace.actions.resetTranslation') }}
                   </button>
                   <button
                     class="btn-danger ml-1 !px-2 !py-0.5 text-[11px]"
                     @click="removeChapter(chapter)"
                   >
-                    Hapus
+                    {{ t('common.actions.delete') }}
                   </button>
                 </td>
               </tr>
@@ -1336,40 +1398,44 @@ onBeforeUnmount(stopStream)
       <template v-else>
         <div class="mb-4 flex flex-wrap items-center gap-2">
           <button class="btn-ghost" :disabled="jobActive" @click="startAnalyze">
-            Run AI Analysis
+            {{ t('workspace.actions.runAnalysis') }}
           </button>
           <button class="btn-primary" :disabled="savingReference" @click="saveReference">
-            {{ savingReference ? 'Menyimpan…' : 'Simpan Perubahan' }}
+            {{ savingReference ? t('common.actions.saving') : t('workspace.actions.saveChanges') }}
           </button>
           <button
             class="btn-ghost"
             :disabled="jobActive || applyingReference || !translatedChaptersCount"
-            title="Perbarui istilah & nama karakter pada bab yang sudah diterjemahkan agar sesuai pengaturan terbaru"
+            :title="t('workspace.tooltips.applyReference')"
             @click="applyReferenceToTranslated"
           >
             {{
               applyingReference
-                ? 'Memulai…'
-                : `Terapkan ke Bab Terjemahan (${translatedChaptersCount})`
+                ? t('workspace.actions.starting')
+                : t('workspace.actions.applyToTranslated', { count: translatedChaptersCount })
             }}
           </button>
-          <span v-if="referenceDirty" class="text-xs text-amber-400">ada perubahan belum disimpan</span>
-          <span v-else class="text-xs text-slate-500">tersimpan</span>
+          <span v-if="referenceDirty" class="text-xs text-amber-400">
+            {{ t('common.state.unsaved') }}
+          </span>
+          <span v-else class="text-xs text-slate-500">{{ t('workspace.state.saved') }}</span>
         </div>
 
-        <p v-if="referenceLoading" class="text-sm text-slate-500">Memuat reference…</p>
+        <p v-if="referenceLoading" class="text-sm text-slate-500">
+          {{ t('workspace.reference.loading') }}
+        </p>
 
         <div v-else-if="reference" class="space-y-5">
           <!-- guide -->
           <section class="card">
-            <h2 class="mb-2 text-sm font-semibold text-white">Translation Guide</h2>
-            <p class="mb-2 text-xs text-slate-500">
-              Gaya bahasa, nada, aturan penamaan. Disuntikkan ke setiap prompt translasi.
-            </p>
+            <h2 class="mb-2 text-sm font-semibold text-strong">
+              {{ t('workspace.reference.guideTitle') }}
+            </h2>
+            <p class="mb-2 text-xs text-slate-500">{{ t('workspace.reference.guideHint') }}</p>
             <textarea
               v-model="reference.translation_guide"
               class="input h-28 resize-y text-xs"
-              placeholder="mis. Gunakan nada formal, pertahankan istilah militer, nama karakter memakai romanisasi…"
+              :placeholder="t('workspace.reference.guidePlaceholder')"
               @input="markDirty"
             />
           </section>
@@ -1377,8 +1443,8 @@ onBeforeUnmount(stopStream)
           <!-- characters -->
           <section class="card">
             <div class="mb-3 flex items-center justify-between gap-2">
-              <h2 class="text-sm font-semibold text-white">
-                Characters
+              <h2 class="text-sm font-semibold text-strong">
+                {{ t('workspace.reference.charactersTitle') }}
                 <span class="ml-1 text-xs font-normal tabular-nums text-slate-500">
                   ({{ reference.characters.length }})
                 </span>
@@ -1388,20 +1454,20 @@ onBeforeUnmount(stopStream)
                 class="btn-ghost !px-2.5 !py-1 text-xs"
                 @click="addCharacter"
               >
-                + Karakter
+                {{ t('workspace.reference.addCharacter') }}
               </button>
             </div>
 
             <p v-if="!reference.characters.length" class="text-xs text-slate-500">
-              Belum ada karakter. Jalankan Run AI Analysis atau tambah manual.
+              {{ t('workspace.reference.charactersEmpty') }}
             </p>
 
             <div v-else>
               <div class="hidden gap-3 border-b border-ink-800/80 pb-1.5 text-[11px] font-medium text-slate-400 sm:grid sm:grid-cols-[minmax(0,1.2fr)_minmax(0,1.8fr)_minmax(0,1.4fr)_auto]">
-                <span>Karakter</span>
-                <span>Julukan & Relasi</span>
-                <span>Catatan</span>
-                <span class="text-right">Aksi</span>
+                <span>{{ t('workspace.reference.colCharacter') }}</span>
+                <span>{{ t('workspace.reference.colAliases') }}</span>
+                <span>{{ t('workspace.reference.colNotes') }}</span>
+                <span class="text-right">{{ t('workspace.reference.colActions') }}</span>
               </div>
               <div class="divide-y divide-ink-800/80">
                 <div
@@ -1410,14 +1476,14 @@ onBeforeUnmount(stopStream)
                   class="grid items-start gap-2.5 py-2.5 sm:grid-cols-[minmax(0,1.2fr)_minmax(0,1.8fr)_minmax(0,1.4fr)_auto]"
                 >
                   <div class="min-w-0">
-                    <p class="truncate text-xs font-semibold text-white">
-                      {{ character.romanized_name || character.name || '(tanpa nama)' }}
+                    <p class="truncate text-xs font-semibold text-strong">
+                      {{ character.romanized_name || character.name || t('workspace.reference.unnamed') }}
                     </p>
                     <p
                       v-if="character.name && character.romanized_name"
                       class="truncate text-[11px] text-slate-400"
                     >
-                      Asli: {{ character.name }}
+                      {{ t('workspace.reference.originalName', { name: character.name }) }}
                     </p>
                     <div
                       v-if="character.gender || character.age"
@@ -1426,14 +1492,14 @@ onBeforeUnmount(stopStream)
                       <span
                         v-if="character.gender"
                         class="badge bg-sky-950/60 text-sky-300"
-                        title="Gender"
+                        :title="t('workspace.reference.gender')"
                       >
                         {{ character.gender }}
                       </span>
                       <span
                         v-if="character.age"
                         class="badge bg-amber-950/60 text-amber-300"
-                        title="Usia"
+                        :title="t('workspace.reference.age')"
                       >
                         {{ character.age }}
                       </span>
@@ -1442,16 +1508,20 @@ onBeforeUnmount(stopStream)
 
                   <div class="min-w-0 space-y-1 text-xs">
                     <p v-if="(character.aliases ?? []).length" class="text-indigo-300">
-                      <span class="text-[11px] text-slate-500">Julukan:</span>
+                      <span class="text-[11px] text-slate-500">
+                        {{ t('workspace.reference.aliasesLabel') }}
+                      </span>
                       {{ aliasesToText(character) }}
                     </p>
                     <p v-if="character.relationships" class="text-slate-300">
-                      <span class="text-[11px] text-slate-500">Relasi:</span>
+                      <span class="text-[11px] text-slate-500">
+                        {{ t('workspace.reference.relationsLabel') }}
+                      </span>
                       {{ character.relationships }}
                     </p>
                     <p
                       v-if="!(character.aliases ?? []).length && !character.relationships"
-                      class="text-slate-600"
+                      class="text-slate-500"
                     >
                       —
                     </p>
@@ -1467,13 +1537,13 @@ onBeforeUnmount(stopStream)
                       class="btn-ghost !px-2 !py-1 text-[11px]"
                       @click="openCharacterModal(index)"
                     >
-                      Edit
+                      {{ t('common.actions.edit') }}
                     </button>
                     <button
                       type="button"
                       class="btn-danger !px-2 !py-1 text-[11px]"
-                      title="Hapus karakter"
-                      aria-label="Hapus karakter"
+                      :title="t('workspace.reference.removeCharacter')"
+                      :aria-label="t('workspace.reference.removeCharacter')"
                       @click="removeAt(reference.characters, index)"
                     >
                       ✕
@@ -1487,8 +1557,8 @@ onBeforeUnmount(stopStream)
           <!-- terms -->
           <section class="card">
             <div class="mb-3 flex items-center justify-between gap-2">
-              <h2 class="text-sm font-semibold text-white">
-                Terms / Glossary
+              <h2 class="text-sm font-semibold text-strong">
+                {{ t('workspace.reference.termsTitle') }}
                 <span class="ml-1 text-xs font-normal tabular-nums text-slate-500">
                   ({{ reference.terms.length }})
                 </span>
@@ -1498,23 +1568,23 @@ onBeforeUnmount(stopStream)
                 class="btn-ghost !px-2.5 !py-1 text-xs"
                 @click="addTerm"
               >
-                + Istilah
+                {{ t('workspace.reference.addTerm') }}
               </button>
             </div>
             <p v-if="!reference.terms.length" class="text-xs text-slate-500">
-              Istilah wajib (tingkatan, teknik, organisasi). Dipakai juga untuk skor kepatuhan.
+              {{ t('workspace.reference.termsEmpty') }}
             </p>
             <div v-else>
               <div class="hidden gap-1.5 border-b border-ink-800/80 pb-1.5 text-[11px] font-medium text-slate-400 sm:grid sm:grid-cols-[minmax(0,0.85fr)_minmax(0,0.85fr)_minmax(0,1fr)_minmax(0,1fr)_76px_28px]">
-                <span>Asli</span>
-                <span>Cara baca</span>
-                <span>Terjemahan</span>
-                <span>Catatan</span>
+                <span>{{ t('workspace.reference.colSource') }}</span>
+                <span>{{ t('workspace.reference.colRomanized') }}</span>
+                <span>{{ t('workspace.reference.colTarget') }}</span>
+                <span>{{ t('workspace.reference.colNotes') }}</span>
                 <span
                   class="whitespace-nowrap text-center"
-                  title="Tetap pakai kata Latin dengan terjemahan dalam kurung"
+                  :title="t('workspace.reference.latinHint')"
                 >
-                  Latin (TL)
+                  {{ t('workspace.reference.colLatin') }}
                 </span>
                 <span />
               </div>
@@ -1527,33 +1597,33 @@ onBeforeUnmount(stopStream)
                   <input
                     v-model="term.source"
                     class="input !px-2 !py-1 text-xs"
-                    placeholder="Asli"
-                    title="Istilah asli (aksara sumber)"
-                    aria-label="Istilah asli"
+                    :placeholder="t('workspace.reference.phSource')"
+                    :title="t('workspace.reference.titleSourceTerm')"
+                    :aria-label="t('workspace.reference.ariaSourceTerm')"
                     @input="markDirty"
                   />
                   <input
                     v-model="term.romanized"
                     class="input !px-2 !py-1 text-xs"
-                    placeholder="Cara baca"
-                    title="Cara baca / romanisasi Latin"
-                    aria-label="Cara baca"
+                    :placeholder="t('workspace.reference.phRomanized')"
+                    :title="t('workspace.reference.titleRomanized')"
+                    :aria-label="t('workspace.reference.ariaRomanized')"
                     @input="markDirty"
                   />
                   <input
                     v-model="term.target"
                     class="input !px-2 !py-1 text-xs"
-                    placeholder="Terjemahan"
-                    title="Terjemahan istilah"
-                    aria-label="Terjemahan"
+                    :placeholder="t('workspace.reference.phTarget')"
+                    :title="t('workspace.reference.titleTargetTerm')"
+                    :aria-label="t('workspace.reference.ariaTarget')"
                     @input="markDirty"
                   />
                   <input
                     v-model="term.note"
                     class="input !px-2 !py-1 text-xs"
-                    placeholder="Catatan"
-                    title="Catatan konteks istilah"
-                    aria-label="Catatan"
+                    :placeholder="t('workspace.reference.phNote')"
+                    :title="t('workspace.reference.titleNoteTerm')"
+                    :aria-label="t('workspace.reference.ariaNote')"
                     @input="markDirty"
                   />
                   <label
@@ -1565,24 +1635,31 @@ onBeforeUnmount(stopStream)
                     "
                     :title="
                       term.keep_romanized && (term.romanized || '').trim()
-                        ? `Format: ${term.romanized.trim()}${(term.target || '').trim() ? ` (${term.target.trim()})` : ''}`
-                        : 'Pakai format Latin (Terjemahan)'
+                        ? (term.target || '').trim()
+                          ? t('workspace.reference.formatWithTarget', {
+                              romanized: term.romanized.trim(),
+                              target: term.target.trim(),
+                            })
+                          : t('workspace.reference.formatPlain', {
+                              romanized: term.romanized.trim(),
+                            })
+                        : t('workspace.reference.latinFormatHint')
                     "
                   >
                     <input
                       v-model="term.keep_romanized"
                       type="checkbox"
                       class="h-3 w-3 accent-indigo-500 focus:outline-none"
-                      aria-label="Pertahankan format Latin dengan terjemahan dalam kurung"
+                      :aria-label="t('workspace.reference.keepLatinAria')"
                       @change="markDirty"
                     />
-                    <span>Latin</span>
+                    <span>{{ t('workspace.reference.latin') }}</span>
                   </label>
                   <button
                     type="button"
                     class="btn-danger h-[26px] w-7 justify-self-end !p-0 text-[11px] sm:w-full sm:justify-self-auto"
-                    title="Hapus istilah"
-                    aria-label="Hapus istilah"
+                    :title="t('workspace.reference.removeTerm')"
+                    :aria-label="t('workspace.reference.removeTerm')"
                     @click="removeAt(reference.terms, index)"
                   >
                     ✕
@@ -1595,8 +1672,8 @@ onBeforeUnmount(stopStream)
           <!-- locations -->
           <section class="card">
             <div class="mb-3 flex items-center justify-between gap-2">
-              <h2 class="text-sm font-semibold text-white">
-                Locations
+              <h2 class="text-sm font-semibold text-strong">
+                {{ t('workspace.reference.locationsTitle') }}
                 <span class="ml-1 text-xs font-normal tabular-nums text-slate-500">
                   ({{ reference.locations.length }})
                 </span>
@@ -1606,21 +1683,23 @@ onBeforeUnmount(stopStream)
                 class="btn-ghost !px-2.5 !py-1 text-xs"
                 @click="addLocation"
               >
-                + Lokasi
+                {{ t('workspace.reference.addLocation') }}
               </button>
             </div>
-            <p v-if="!reference.locations.length" class="text-xs text-slate-500">Belum ada lokasi.</p>
+            <p v-if="!reference.locations.length" class="text-xs text-slate-500">
+              {{ t('workspace.reference.locationsEmpty') }}
+            </p>
             <div v-else>
               <div class="hidden gap-1.5 border-b border-ink-800/80 pb-1.5 text-[11px] font-medium text-slate-400 sm:grid sm:grid-cols-[minmax(0,0.85fr)_minmax(0,0.85fr)_minmax(0,1fr)_minmax(0,1fr)_76px_28px]">
-                <span>Asli</span>
-                <span>Cara baca</span>
-                <span>Terjemahan</span>
-                <span>Catatan</span>
+                <span>{{ t('workspace.reference.colSource') }}</span>
+                <span>{{ t('workspace.reference.colRomanized') }}</span>
+                <span>{{ t('workspace.reference.colTarget') }}</span>
+                <span>{{ t('workspace.reference.colNotes') }}</span>
                 <span
                   class="whitespace-nowrap text-center"
-                  title="Tetap pakai kata Latin dengan terjemahan dalam kurung"
+                  :title="t('workspace.reference.latinHint')"
                 >
-                  Latin (TL)
+                  {{ t('workspace.reference.colLatin') }}
                 </span>
                 <span />
               </div>
@@ -1633,33 +1712,33 @@ onBeforeUnmount(stopStream)
                   <input
                     v-model="location.source"
                     class="input !px-2 !py-1 text-xs"
-                    placeholder="Asli"
-                    title="Nama lokasi asli (aksara sumber)"
-                    aria-label="Nama lokasi asli"
+                    :placeholder="t('workspace.reference.phSource')"
+                    :title="t('workspace.reference.titleSourceLocation')"
+                    :aria-label="t('workspace.reference.ariaSourceLocation')"
                     @input="markDirty"
                   />
                   <input
                     v-model="location.romanized"
                     class="input !px-2 !py-1 text-xs"
-                    placeholder="Cara baca"
-                    title="Cara baca / romanisasi Latin"
-                    aria-label="Cara baca"
+                    :placeholder="t('workspace.reference.phRomanized')"
+                    :title="t('workspace.reference.titleRomanized')"
+                    :aria-label="t('workspace.reference.ariaRomanized')"
                     @input="markDirty"
                   />
                   <input
                     v-model="location.target"
                     class="input !px-2 !py-1 text-xs"
-                    placeholder="Terjemahan"
-                    title="Terjemahan lokasi"
-                    aria-label="Terjemahan"
+                    :placeholder="t('workspace.reference.phTarget')"
+                    :title="t('workspace.reference.titleTargetLocation')"
+                    :aria-label="t('workspace.reference.ariaTarget')"
                     @input="markDirty"
                   />
                   <input
                     v-model="location.note"
                     class="input !px-2 !py-1 text-xs"
-                    placeholder="Catatan"
-                    title="Catatan konteks lokasi"
-                    aria-label="Catatan"
+                    :placeholder="t('workspace.reference.phNote')"
+                    :title="t('workspace.reference.titleNoteLocation')"
+                    :aria-label="t('workspace.reference.ariaNote')"
                     @input="markDirty"
                   />
                   <label
@@ -1671,24 +1750,31 @@ onBeforeUnmount(stopStream)
                     "
                     :title="
                       location.keep_romanized && (location.romanized || '').trim()
-                        ? `Format: ${location.romanized.trim()}${(location.target || '').trim() ? ` (${location.target.trim()})` : ''}`
-                        : 'Pakai format Latin (Terjemahan)'
+                        ? (location.target || '').trim()
+                          ? t('workspace.reference.formatWithTarget', {
+                              romanized: location.romanized.trim(),
+                              target: location.target.trim(),
+                            })
+                          : t('workspace.reference.formatPlain', {
+                              romanized: location.romanized.trim(),
+                            })
+                        : t('workspace.reference.latinFormatHint')
                     "
                   >
                     <input
                       v-model="location.keep_romanized"
                       type="checkbox"
                       class="h-3 w-3 accent-indigo-500 focus:outline-none"
-                      aria-label="Pertahankan format Latin dengan terjemahan dalam kurung"
+                      :aria-label="t('workspace.reference.keepLatinAria')"
                       @change="markDirty"
                     />
-                    <span>Latin</span>
+                    <span>{{ t('workspace.reference.latin') }}</span>
                   </label>
                   <button
                     type="button"
                     class="btn-danger h-[26px] w-7 justify-self-end !p-0 text-[11px] sm:w-full sm:justify-self-auto"
-                    title="Hapus lokasi"
-                    aria-label="Hapus lokasi"
+                    :title="t('workspace.reference.removeLocation')"
+                    :aria-label="t('workspace.reference.removeLocation')"
                     @click="removeAt(reference.locations, index)"
                   >
                     ✕
@@ -1700,14 +1786,14 @@ onBeforeUnmount(stopStream)
 
           <!-- rolling context -->
           <section class="card">
-            <h2 class="mb-2 text-sm font-semibold text-white">
-              Rolling Chapter Context
+            <h2 class="mb-2 text-sm font-semibold text-strong">
+              {{ t('workspace.reference.contextTitle') }}
               <span class="ml-1 text-xs font-normal text-slate-500">
-                ({{ reference.chapter_context.length }}/5 terakhir)
+                {{ t('workspace.reference.contextCount', { count: reference.chapter_context.length }) }}
               </span>
             </h2>
             <p v-if="!reference.chapter_context.length" class="text-xs text-slate-500">
-              Belum ada ringkasan. Jalankan Run AI Analysis untuk mengisinya.
+              {{ t('workspace.reference.contextEmpty') }}
             </p>
             <ol v-else class="space-y-2">
               <li
@@ -1715,7 +1801,9 @@ onBeforeUnmount(stopStream)
                 :key="entry.chapter_id"
                 class="rounded-lg border border-ink-800 px-3 py-2 text-xs"
               >
-                <span class="font-mono text-slate-500">Bab {{ entry.chapter_number }}</span>
+                <span class="font-mono text-slate-500">
+                  {{ t('common.job.chapter', { number: entry.chapter_number }) }}
+                </span>
                 <span class="ml-2 text-slate-300">{{ entry.title }}</span>
                 <p class="mt-1 text-slate-400">{{ entry.summary }}</p>
               </li>
@@ -1736,86 +1824,94 @@ onBeforeUnmount(stopStream)
         @submit.prevent="saveCharacterModal"
       >
         <div>
-          <h2 class="text-sm font-semibold text-white">
-            {{ characterModal.index >= 0 ? 'Edit Karakter' : 'Tambah Karakter' }}
+          <h2 class="text-sm font-semibold text-strong">
+            {{
+              characterModal.index >= 0
+                ? t('workspace.characterModal.editTitle')
+                : t('workspace.characterModal.addTitle')
+            }}
           </h2>
-          <p class="mt-1 text-xs text-slate-500">
-            Data karakter disuntikkan ke prompt translasi agar ejaan nama, julukan, dan relasi tetap konsisten.
-          </p>
+          <p class="mt-1 text-xs text-slate-500">{{ t('workspace.characterModal.hint') }}</p>
         </div>
 
         <div class="grid gap-3 sm:grid-cols-2">
           <div>
-            <label class="label" for="char-name">Nama (Aksara Sumber)</label>
+            <label class="label" for="char-name">{{ t('workspace.characterModal.name') }}</label>
             <input
               id="char-name"
               v-model="characterModal.name"
               class="input text-xs"
-              placeholder="mis. 林风"
+              :placeholder="t('workspace.characterModal.namePlaceholder')"
             />
           </div>
           <div>
-            <label class="label" for="char-romanized">Nama Romanisasi (Latin)</label>
+            <label class="label" for="char-romanized">
+              {{ t('workspace.characterModal.romanized') }}
+            </label>
             <input
               id="char-romanized"
               v-model="characterModal.romanized_name"
               class="input text-xs"
-              placeholder="mis. Lin Feng"
+              :placeholder="t('workspace.characterModal.romanizedPlaceholder')"
             />
           </div>
           <div>
-            <label class="label" for="char-gender">Gender</label>
+            <label class="label" for="char-gender">{{ t('workspace.characterModal.gender') }}</label>
             <input
               id="char-gender"
               v-model="characterModal.gender"
               class="input text-xs"
-              placeholder="mis. Male / Female"
+              :placeholder="t('workspace.characterModal.genderPlaceholder')"
             />
           </div>
           <div>
-            <label class="label" for="char-age">Usia</label>
+            <label class="label" for="char-age">{{ t('workspace.characterModal.age') }}</label>
             <input
               id="char-age"
               v-model="characterModal.age"
               class="input text-xs"
-              placeholder="mis. 18"
+              :placeholder="t('workspace.characterModal.agePlaceholder')"
             />
           </div>
         </div>
 
         <div>
-          <label class="label" for="char-aliases">Alias / Julukan (pisahkan dengan koma)</label>
+          <label class="label" for="char-aliases">{{ t('workspace.characterModal.aliases') }}</label>
           <input
             id="char-aliases"
             v-model="characterModal.aliasesText"
             class="input text-xs"
-            placeholder="mis. Senior Brother Lin, Shadow Blade"
+            :placeholder="t('workspace.characterModal.aliasesPlaceholder')"
           />
         </div>
 
         <div>
-          <label class="label" for="char-relationships">Relasi Antar Karakter</label>
+          <label class="label" for="char-relationships">
+            {{ t('workspace.characterModal.relationships') }}
+          </label>
           <input
             id="char-relationships"
             v-model="characterModal.relationships"
             class="input text-xs"
-            placeholder="mis. Elder martial brother of Su Mei; disciple of Sect Master"
+            :placeholder="t('workspace.characterModal.relationshipsPlaceholder')"
           />
         </div>
 
         <div>
-          <label class="label" for="char-notes">Catatan Karakter</label>
+          <label class="label" for="char-notes">{{ t('workspace.characterModal.notes') }}</label>
           <textarea
             id="char-notes"
             v-model="characterModal.notes"
             class="input h-20 resize-y text-xs"
-            placeholder="mis. Speaks formally to elders, calm personality"
+            :placeholder="t('workspace.characterModal.notesPlaceholder')"
           />
         </div>
 
         <div class="flex justify-end gap-2">
-          <button type="button" class="btn-ghost" @click="characterModal = null">Batal</button>
-          <button type="submit" class="btn-primary">Simpan Karakter</button>
+          <button type="button" class="btn-ghost" @click="characterModal = null">
+            {{ t('common.actions.cancel') }}
+          </button>
+          <button type="submit" class="btn-primary">{{ t('workspace.characterModal.save') }}</button>
         </div>
       </form>
     </div>
@@ -1831,14 +1927,11 @@ onBeforeUnmount(stopStream)
         @submit.prevent="addFromUrls"
       >
         <div>
-          <h2 class="text-sm font-semibold text-white">Tambah Bab dari URL</h2>
-          <p class="mt-1 text-xs text-slate-500">
-            Satu URL bab per baris. Modul scraper dipilih otomatis dari domain; URL yang sudah ada
-            di novel ini akan dilewati.
-          </p>
+          <h2 class="text-sm font-semibold text-strong">{{ t('workspace.urlModal.title') }}</h2>
+          <p class="mt-1 text-xs text-slate-500">{{ t('workspace.urlModal.hint') }}</p>
         </div>
         <div>
-          <label class="label" for="urls-input">URL bab</label>
+          <label class="label" for="urls-input">{{ t('workspace.urlModal.label') }}</label>
           <textarea
             id="urls-input"
             v-model="urlsText"
@@ -1846,13 +1939,15 @@ onBeforeUnmount(stopStream)
             placeholder="https://contoh.com/book/123/chapter-1.htm&#10;https://contoh.com/book/123/chapter-2.htm"
           />
           <p class="mt-1 text-[11px] text-slate-500">
-            {{ urlsText.split(/\n/).filter((item) => item.trim()).length }} URL terdeteksi
+            {{ t('workspace.urlModal.detected', { count: urlsText.split(/\n/).filter((item) => item.trim()).length }) }}
           </p>
         </div>
         <div class="flex justify-end gap-2">
-          <button type="button" class="btn-ghost" @click="showUrlModal = false">Batal</button>
+          <button type="button" class="btn-ghost" @click="showUrlModal = false">
+            {{ t('common.actions.cancel') }}
+          </button>
           <button type="submit" class="btn-primary" :disabled="savingUrls || !urlsText.trim()">
-            {{ savingUrls ? 'Mengambil…' : 'Tambah Bab' }}
+            {{ savingUrls ? t('workspace.urlModal.fetching') : t('workspace.urlModal.submit') }}
           </button>
         </div>
       </form>
@@ -1868,47 +1963,51 @@ onBeforeUnmount(stopStream)
         class="w-full max-w-2xl space-y-4 rounded-xl border border-ink-700 bg-ink-900 p-5 shadow-2xl"
         @submit.prevent="saveManual"
       >
-        <h2 class="text-sm font-semibold text-white">Tambah Bab Manual</h2>
+        <h2 class="text-sm font-semibold text-strong">{{ t('workspace.manualModal.title') }}</h2>
         <div class="grid grid-cols-3 gap-3">
           <div>
-            <label class="label" for="manual-no">Nomor bab</label>
+            <label class="label" for="manual-no">{{ t('workspace.manualModal.number') }}</label>
             <input
               id="manual-no"
               v-model.number="manualForm.chapter_number"
               class="input"
               type="number"
               step="1"
-              placeholder="otomatis"
+              :placeholder="t('workspace.manualModal.numberPlaceholder')"
             />
           </div>
           <div class="col-span-2">
-            <label class="label" for="manual-chapter-title">Judul bab</label>
+            <label class="label" for="manual-chapter-title">
+              {{ t('workspace.manualModal.chapterTitle') }}
+            </label>
             <input
               id="manual-chapter-title"
               v-model="manualForm.title"
               class="input"
               type="text"
-              placeholder="opsional"
+              :placeholder="t('common.state.optional')"
             />
           </div>
         </div>
         <div>
-          <label class="label" for="manual-content">Isi bab (paste teks)</label>
+          <label class="label" for="manual-content">{{ t('workspace.manualModal.content') }}</label>
           <textarea
             id="manual-content"
             v-model="manualForm.raw_content"
             class="input h-64 resize-y font-mono text-xs"
-            placeholder="Tempel isi bab di sini…"
+            :placeholder="t('workspace.manualModal.contentPlaceholder')"
           />
         </div>
         <div class="flex justify-end gap-2">
-          <button type="button" class="btn-ghost" @click="showManual = false">Batal</button>
+          <button type="button" class="btn-ghost" @click="showManual = false">
+            {{ t('common.actions.cancel') }}
+          </button>
           <button
             type="submit"
             class="btn-primary"
             :disabled="savingManual || !manualForm.raw_content.trim()"
           >
-            {{ savingManual ? 'Menyimpan…' : 'Simpan Bab' }}
+            {{ savingManual ? t('common.actions.saving') : t('workspace.manualModal.save') }}
           </button>
         </div>
       </form>
@@ -1925,9 +2024,11 @@ onBeforeUnmount(stopStream)
         @submit.prevent="saveChapter"
       >
         <div class="flex flex-wrap items-center justify-between gap-2">
-          <h2 class="text-sm font-semibold text-white">
-            Bab {{ editing.chapter_number }}
-            <span class="badge ml-2" :class="statusStyles[editing.status]">{{ editing.status }}</span>
+          <h2 class="text-sm font-semibold text-strong">
+            {{ t('common.job.chapter', { number: editing.chapter_number }) }}
+            <span class="badge ml-2" :class="statusStyles[editing.status]">
+              {{ chapterStatusLabel(editing.status) }}
+            </span>
             <span
               v-if="editing.quality_score !== null && editing.quality_score !== undefined"
               class="badge ml-1"
@@ -1942,10 +2043,18 @@ onBeforeUnmount(stopStream)
               :key="pane"
               type="button"
               class="rounded px-2 py-1 text-[11px]"
-              :class="editPane === pane ? 'bg-ink-800 text-white' : 'text-slate-400 hover:text-slate-200'"
+              :class="editPane === pane
+                ? 'bg-ink-800 text-strong'
+                : 'text-slate-400 hover:text-slate-200'"
               @click="editPane = pane"
             >
-              {{ pane === 'both' ? 'Side by side' : pane === 'raw' ? 'Raw' : 'Translated' }}
+              {{
+                pane === 'both'
+                  ? t('workspace.chapterModal.sideBySide')
+                  : pane === 'raw'
+                    ? t('common.status.raw')
+                    : t('common.status.translated')
+              }}
             </button>
             <button type="button" class="ml-2 text-slate-500 hover:text-slate-200" @click="editing = null">
               ✕
@@ -1954,45 +2063,51 @@ onBeforeUnmount(stopStream)
         </div>
 
         <div>
-          <label class="label" for="edit-title">Judul</label>
+          <label class="label" for="edit-title">{{ t('workspace.chapterModal.title') }}</label>
           <input id="edit-title" v-model="editForm.title" class="input" type="text" />
         </div>
 
         <div class="grid gap-3" :class="editPane === 'both' ? 'lg:grid-cols-2' : 'grid-cols-1'">
           <div v-if="editPane !== 'translated'">
             <label class="label" for="edit-raw">
-              Raw ({{ editForm.raw_content.length }} karakter)
+              {{ t('workspace.chapterModal.rawLabel', { count: editForm.raw_content.length }) }}
             </label>
             <textarea
               id="edit-raw"
               v-model="editForm.raw_content"
               class="input h-80 resize-y font-mono text-xs"
-              placeholder="Belum ada isi — jalankan Fetch Raw untuk bab ini."
+              :placeholder="t('workspace.chapterModal.rawPlaceholder')"
             />
           </div>
           <div v-if="editPane !== 'raw'">
             <label class="label" for="edit-translated">
-              Translated ({{ editForm.translated_content.length }} karakter)
+              {{
+                t('workspace.chapterModal.translatedLabel', {
+                  count: editForm.translated_content.length,
+                })
+              }}
             </label>
             <textarea
               id="edit-translated"
               v-model="editForm.translated_content"
               class="input h-80 resize-y font-mono text-xs"
-              placeholder="Belum diterjemahkan — pilih bab ini lalu klik Translate Terpilih."
+              :placeholder="t('workspace.chapterModal.translatedPlaceholder')"
             />
           </div>
         </div>
 
         <div class="flex items-center justify-end gap-2">
-          <button type="button" class="btn-ghost" @click="editing = null">Batal</button>
+          <button type="button" class="btn-ghost" @click="editing = null">
+            {{ t('common.actions.cancel') }}
+          </button>
           <button type="submit" class="btn-primary" :disabled="savingEdit">
-            {{ savingEdit ? 'Menyimpan…' : 'Simpan' }}
+            {{ savingEdit ? t('common.actions.saving') : t('common.actions.save') }}
           </button>
         </div>
       </form>
     </div>
 
-    <!-- Modal: Peringatan bab sebelumnya belum diterjemahkan -->
+    <!-- Modal: warning that earlier chapters are not translated yet -->
     <div
       v-if="contextWarning"
       class="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm"
@@ -2002,14 +2117,15 @@ onBeforeUnmount(stopStream)
         <div class="flex items-start justify-between gap-2">
           <div>
             <h2 class="text-base font-semibold text-amber-300">
-              Bab Sebelumnya Belum Diterjemahkan
+              {{ t('workspace.contextWarning.title') }}
             </h2>
             <p class="mt-1 text-xs text-slate-400">
-              Anda memilih mulai dari <strong>Bab {{ contextWarning.minSelectedNo }}</strong>, namun
-              masih ada <strong>{{ contextWarning.earlierCount }} bab sebelumnya</strong> yang
-              belum berstatus <code class="text-slate-300">translated</code> ({{
-                contextWarning.earlierSample
-              }}).
+              {{ t('workspace.contextWarning.bodyStart') }}
+              <strong>{{ t('common.job.chapter', { number: contextWarning.minSelectedNo }) }}</strong>{{ t('workspace.contextWarning.bodyMiddle') }}
+              <strong>{{ t('workspace.contextWarning.earlierCount', { count: contextWarning.earlierCount }) }}</strong>
+              {{ t('workspace.contextWarning.bodyAfterCount') }}
+              <code class="text-slate-300">translated</code>
+              {{ t('workspace.contextWarning.bodyEnd', { sample: contextWarning.earlierSample }) }}
             </p>
           </div>
           <button
@@ -2022,18 +2138,18 @@ onBeforeUnmount(stopStream)
         </div>
 
         <div class="rounded-lg border border-amber-900/60 bg-amber-950/30 p-3 text-xs leading-relaxed text-amber-200">
-          Jika langsung menerjemahkan bab ini tanpa bab sebelumnya, terjemahan
-          <strong>berisiko tidak memiliki konteks cerita sebelumnya</strong> sehingga konsistensi
-          alur, gaya bahasa, dan nama karakter bisa kurang memuaskan.
+          {{ t('workspace.contextWarning.warnStart') }}
+          <strong>{{ t('workspace.contextWarning.warnStrong') }}</strong>{{ t('workspace.contextWarning.warnEnd') }}
           <span v-if="contextWarning.pendingCount" class="mt-1 block text-amber-300/90">
-            Catatan: {{ contextWarning.pendingCount }} bab sebelumnya masih berstatus
-            <code>pending_fetch</code> (belum di-fetch raw).
+            {{ t('workspace.contextWarning.noteStart', { count: contextWarning.pendingCount }) }}
+            <code>pending_fetch</code>
+            {{ t('workspace.contextWarning.noteEnd') }}
           </span>
         </div>
 
         <div class="flex flex-wrap justify-end gap-2">
           <button type="button" class="btn-ghost text-xs" @click="contextWarning = null">
-            Batal
+            {{ t('common.actions.cancel') }}
           </button>
           <button
             v-if="contextWarning.earlierReadyIds.length"
@@ -2041,14 +2157,18 @@ onBeforeUnmount(stopStream)
             class="btn-primary text-xs"
             @click="confirmTranslateEarlier"
           >
-            Translate Bab Sebelumnya Dulu ({{ contextWarning.earlierReadyIds.length + contextWarning.selectedIds.length }} bab)
+            {{
+              t('workspace.contextWarning.translateEarlier', {
+                count: contextWarning.earlierReadyIds.length + contextWarning.selectedIds.length,
+              })
+            }}
           </button>
           <button
             type="button"
             class="rounded-lg border border-amber-700/70 bg-amber-950/50 px-3 py-1.5 text-xs font-medium text-amber-200 transition-colors hover:bg-amber-900/60"
             @click="confirmTranslateAnyway"
           >
-            Tetap Translate (Tanpa Konteks)
+            {{ t('workspace.contextWarning.translateAnyway') }}
           </button>
         </div>
       </div>

@@ -2,6 +2,47 @@
 @tailwind components;
 @tailwind utilities;
 
+/* --------------------------------------------------------------------------
+   Theme tokens
+   Dark is the default. `html.light` flips every surface, border and text
+   colour at once, so views keep using the same utility classes.
+   -------------------------------------------------------------------------- */
+:root {
+  --ink-950: 11 13 18;
+  --ink-900: 17 20 27;
+  --ink-850: 22 26 35;
+  --ink-800: 28 33 44;
+  --ink-700: 42 49 64;
+  --ink-600: 59 68 87;
+
+  --slate-100: 241 245 249;
+  --slate-200: 226 232 240;
+  --slate-300: 203 213 225;
+  --slate-400: 148 163 184;
+  --slate-500: 100 116 139;
+  --slate-600: 71 85 105;
+
+  --text-strong: 255 255 255;
+}
+
+html.light {
+  --ink-950: 248 250 252;
+  --ink-900: 255 255 255;
+  --ink-850: 241 245 249;
+  --ink-800: 226 232 240;
+  --ink-700: 203 213 225;
+  --ink-600: 148 163 184;
+
+  --slate-100: 15 23 42;
+  --slate-200: 30 41 59;
+  --slate-300: 51 65 85;
+  --slate-400: 71 85 105;
+  --slate-500: 95 112 133;
+  --slate-600: 148 163 184;
+
+  --text-strong: 15 23 42;
+}
+
 @layer base {
   html,
   body,
@@ -50,4 +91,102 @@
   .badge {
     @apply inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium;
   }
+}
+
+/* --------------------------------------------------------------------------
+   Light-mode accents
+   The dark palette leans on *-950 chips with *-300/400 text. On a white card
+   that reads as a heavy dark blob, so each hue gets a pastel tint and a darker
+   foreground. Selectors are explicit (no !important) and only apply in light.
+   -------------------------------------------------------------------------- */
+html.light .bg-emerald-950\/50,
+html.light .bg-emerald-950\/40,
+html.light .bg-emerald-950\/60,
+html.light .bg-emerald-950\/30,
+html.light .bg-emerald-950\/20 {
+  background-color: #ecfdf5;
+}
+html.light .text-emerald-400,
+html.light .text-emerald-300 {
+  color: #047857;
+}
+html.light .border-emerald-900\/60 {
+  border-color: #a7f3d0;
+}
+
+html.light .bg-amber-950\/60,
+html.light .bg-amber-950\/50,
+html.light .bg-amber-950\/30,
+html.light .bg-amber-900\/60 {
+  background-color: #fffbeb;
+}
+html.light .text-amber-400,
+html.light .text-amber-300,
+html.light .text-amber-200,
+html.light .text-amber-500\/80,
+html.light .text-amber-300\/90 {
+  color: #b45309;
+}
+html.light .border-amber-900\/60,
+html.light .border-amber-800\/70,
+html.light .border-amber-700\/70 {
+  border-color: #fcd34d;
+}
+
+html.light .bg-rose-950\/40,
+html.light .bg-rose-950\/30,
+html.light .bg-rose-950\/60,
+html.light .bg-rose-950\/20,
+html.light .bg-rose-900\/40 {
+  background-color: #fff1f2;
+}
+html.light .text-rose-300,
+html.light .text-rose-400 {
+  color: #be123c;
+}
+html.light .border-rose-900\/60,
+html.light .border-rose-700 {
+  border-color: #fecdd3;
+}
+
+html.light .bg-indigo-950\/70,
+html.light .bg-indigo-950\/60,
+html.light .bg-indigo-950\/50,
+html.light .bg-indigo-950\/20,
+html.light .bg-indigo-600\/20 {
+  background-color: #eef2ff;
+}
+html.light .text-indigo-300,
+html.light .text-indigo-200,
+html.light .text-indigo-400 {
+  color: #4338ca;
+}
+html.light .border-indigo-900\/60 {
+  border-color: #c7d2fe;
+}
+
+html.light .bg-sky-950\/60,
+html.light .bg-sky-950\/50,
+html.light .bg-sky-950\/30 {
+  background-color: #f0f9ff;
+}
+html.light .text-sky-400,
+html.light .text-sky-300 {
+  color: #0369a1;
+}
+html.light .border-sky-900\/60 {
+  border-color: #bae6fd;
+}
+
+/* Modal scrims stay dark in both themes, just softer in light mode. */
+html.light .bg-black\/70,
+html.light .bg-black\/75 {
+  background-color: rgb(15 23 42 / 0.45);
+}
+
+/* Cards should not cast a black shadow on a white page. */
+html.light .card {
+  box-shadow:
+    0 1px 2px rgb(15 23 42 / 0.06),
+    0 8px 24px -12px rgb(15 23 42 / 0.18);
 }

@@ -3,8 +3,10 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { novelsApi } from '@/api/novels'
 import { scrapersApi } from '@/api/scrapers'
+import { useI18n } from '@/i18n'
 
 const router = useRouter()
+const { t } = useI18n()
 
 const novels = ref([])
 const loading = ref(true)
@@ -31,16 +33,22 @@ const savingManual = ref(false)
 
 const deletingId = ref(null)
 
-const sourceLangs = [
-  { value: 'zh', label: 'Chinese (zh)' },
-  { value: 'ja', label: 'Japanese (ja)' },
-  { value: 'ko', label: 'Korean (ko)' },
-  { value: 'en', label: 'English (en)' },
-]
-const targetLangs = [
-  { value: 'id', label: 'Indonesian (id)' },
-  { value: 'en', label: 'English (en)' },
-]
+const sourceLangs = computed(() => [
+  { value: 'zh', label: t('library.langZh') },
+  { value: 'ja', label: t('library.langJa') },
+  { value: 'ko', label: t('library.langKo') },
+  { value: 'en', label: t('library.langEn') },
+])
+const targetLangs = computed(() => [
+  { value: 'id', label: t('library.langId') },
+  { value: 'en', label: t('library.langEn') },
+])
+
+const novelCountLabel = computed(() =>
+  t(novels.value.length === 1 ? 'library.countOne' : 'library.count', {
+    count: novels.value.length,
+  }),
+)
 
 const canSaveUrl = computed(() => preview.value?.kind === 'novel' && !savingUrl.value)
 
@@ -114,10 +122,13 @@ async function saveFromUrl() {
     await load()
     flash(
       'success',
-      `"${novel.title_translated || novel.title}" ditambahkan dengan ${novel.chapter_count} bab (status pending fetch).`,
+      t('library.addedFromUrl', {
+        title: novel.title_translated || novel.title,
+        count: novel.chapter_count,
+      }),
     )
   } catch (err) {
-    flash('error', `Gagal menambah novel: ${err.message}`)
+    flash('error', t('library.addFailed', { message: err.message }))
   } finally {
     savingUrl.value = false
   }
@@ -130,23 +141,24 @@ async function saveManual() {
     const novel = await novelsApi.create({ ...manualForm, title: manualForm.title.trim() })
     closeModal()
     await load()
-    flash('success', `"${novel.title_translated || novel.title}" ditambahkan.`)
+    flash('success', t('library.added', { title: novel.title_translated || novel.title }))
   } catch (err) {
-    flash('error', `Gagal menambah novel: ${err.message}`)
+    flash('error', t('library.addFailed', { message: err.message }))
   } finally {
     savingManual.value = false
   }
 }
 
 async function remove(novel) {
-  if (!window.confirm(`Hapus "${novel.title_translated || novel.title}" beserta ${novel.chapter_count} bab?`)) return
+  const title = novel.title_translated || novel.title
+  if (!window.confirm(t('library.confirmDelete', { title, count: novel.chapter_count }))) return
   deletingId.value = novel.id
   try {
     await novelsApi.remove(novel.id)
     await load()
-    flash('success', `"${novel.title_translated || novel.title}" dihapus.`)
+    flash('success', t('library.deleted', { title }))
   } catch (err) {
-    flash('error', `Gagal menghapus: ${err.message}`)
+    flash('error', t('library.deleteFailed', { message: err.message }))
   } finally {
     deletingId.value = null
   }
@@ -167,13 +179,13 @@ onMounted(load)
   <div class="mx-auto max-w-6xl px-6 py-8">
     <header class="mb-6 flex flex-wrap items-end justify-between gap-3">
       <div>
-        <h1 class="text-2xl font-semibold tracking-tight text-white">Library</h1>
+        <h1 class="text-2xl font-semibold tracking-tight text-strong">{{ t('library.title') }}</h1>
         <p class="mt-1 text-sm text-slate-400">
-          Novel dari scraper maupun input manual.
-          <span class="text-slate-500">({{ novels.length }} novel)</span>
+          {{ t('library.subtitle') }}
+          <span class="text-slate-500">{{ novelCountLabel }}</span>
         </p>
       </div>
-      <button class="btn-primary" @click="openModal">+ Tambah Novel</button>
+      <button class="btn-primary" @click="openModal">{{ t('library.addNovel') }}</button>
     </header>
 
     <div
@@ -192,22 +204,22 @@ onMounted(load)
       v-if="error"
       class="mb-5 rounded-lg border border-rose-900/60 bg-rose-950/40 px-4 py-3 text-sm text-rose-300"
     >
-      Gagal memuat library: {{ error }}
-      <button class="ml-2 underline" @click="load">coba lagi</button>
+      {{ t('library.loadFailed', { message: error }) }}
+      <button class="ml-2 underline" @click="load">{{ t('common.actions.retry') }}</button>
     </div>
 
-    <p v-if="loading" class="text-sm text-slate-500">Memuat…</p>
+    <p v-if="loading" class="text-sm text-slate-500">{{ t('common.actions.loading') }}</p>
 
     <div
       v-else-if="!novels.length"
       class="rounded-xl border border-dashed border-ink-700 bg-ink-900/50 px-6 py-16 text-center"
     >
-      <p class="text-sm font-medium text-slate-300">Belum ada novel.</p>
+      <p class="text-sm font-medium text-slate-300">{{ t('library.emptyTitle') }}</p>
       <p class="mx-auto mt-2 max-w-md text-sm text-slate-500">
-        Tambah dari URL situs yang didukung (69shuba, syosetu, bq730, 52shuku) atau input manual
-        dengan paste teks / upload <code class="rounded bg-ink-800 px-1 py-0.5 text-xs">.txt</code>.
+        {{ t('library.emptyHint') }}
+        <code class="rounded bg-ink-800 px-1 py-0.5 text-xs text-slate-400">.txt</code>.
       </p>
-      <button class="btn-primary mt-6" @click="openModal">+ Tambah Novel</button>
+      <button class="btn-primary mt-6" @click="openModal">{{ t('library.addNovel') }}</button>
     </div>
 
     <div v-else class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -228,12 +240,16 @@ onMounted(load)
                 : 'bg-ink-800 text-slate-400'
             "
           >
-            {{ novel.source_type === 'scraper' ? 'Scraper' : 'Manual' }}
+            {{
+              novel.source_type === 'scraper'
+                ? t('library.sourceScraper')
+                : t('library.sourceManual')
+            }}
           </span>
         </div>
 
         <p class="text-xs text-slate-400">
-          {{ novel.author || 'Penulis tidak diketahui' }}
+          {{ novel.author || t('library.unknownAuthor') }}
         </p>
 
         <p
@@ -249,13 +265,17 @@ onMounted(load)
         </p>
 
         <div class="flex flex-wrap gap-1.5 text-[11px]">
-          <span class="badge bg-ink-800 text-slate-300">{{ novel.chapter_count }} bab</span>
-          <span class="badge bg-emerald-950/50 text-emerald-400">{{ novel.raw_count }} raw</span>
+          <span class="badge bg-ink-800 text-slate-300">{{
+            t('common.units.chapters', { count: novel.chapter_count })
+          }}</span>
+          <span class="badge bg-emerald-950/50 text-emerald-400">{{
+            t('library.rawCount', { count: novel.raw_count })
+          }}</span>
           <span class="badge bg-sky-950/50 text-sky-400">
-            {{ novel.translated_count }} translated
+            {{ t('library.translatedCount', { count: novel.translated_count }) }}
           </span>
           <span v-if="novel.pending_count" class="badge bg-amber-950/50 text-amber-400">
-            {{ novel.pending_count }} pending
+            {{ t('library.pendingCount', { count: novel.pending_count }) }}
           </span>
         </div>
 
@@ -264,23 +284,21 @@ onMounted(load)
             class="btn-primary !px-2.5 !py-1 text-xs"
             :disabled="!novel.translated_count"
             :title="
-              novel.translated_count
-                ? 'Buka reader'
-                : 'Belum ada bab terjemahan'
+              novel.translated_count ? t('library.openReader') : t('library.noTranslatedChapters')
             "
             @click="openReader(novel)"
           >
-            {{ novel.last_read_chapter_id ? 'Lanjut Baca' : 'Baca' }}
+            {{ novel.last_read_chapter_id ? t('library.continueReading') : t('library.read') }}
           </button>
           <button class="btn-ghost !px-2.5 !py-1 text-xs" @click="openWorkspace(novel)">
-            Workspace
+            {{ t('library.workspace') }}
           </button>
           <button
             class="btn-danger ml-auto !px-2.5 !py-1 text-xs"
             :disabled="deletingId === novel.id"
             @click="remove(novel)"
           >
-            Hapus
+            {{ t('common.actions.delete') }}
           </button>
         </div>
       </article>
@@ -294,7 +312,7 @@ onMounted(load)
     >
       <div class="w-full max-w-2xl rounded-xl border border-ink-700 bg-ink-900 shadow-2xl">
         <div class="flex items-center justify-between border-b border-ink-800 px-5 py-3">
-          <h2 class="text-sm font-semibold text-white">Tambah Novel</h2>
+          <h2 class="text-sm font-semibold text-strong">{{ t('library.addNovel') }}</h2>
           <button class="text-slate-500 hover:text-slate-200" @click="closeModal">✕</button>
         </div>
 
@@ -303,37 +321,37 @@ onMounted(load)
             class="rounded-t-lg px-3 py-2 text-sm font-medium"
             :class="
               tab === 'url'
-                ? 'border-b-2 border-indigo-500 text-white'
+                ? 'border-b-2 border-indigo-500 text-strong'
                 : 'text-slate-400 hover:text-slate-200'
             "
             @click="tab = 'url'"
           >
-            Dari URL (Scraper)
+            {{ t('library.tabUrl') }}
           </button>
           <button
             class="rounded-t-lg px-3 py-2 text-sm font-medium"
             :class="
               tab === 'manual'
-                ? 'border-b-2 border-indigo-500 text-white'
+                ? 'border-b-2 border-indigo-500 text-strong'
                 : 'text-slate-400 hover:text-slate-200'
             "
             @click="tab = 'manual'"
           >
-            Input Manual
+            {{ t('library.tabManual') }}
           </button>
         </div>
 
         <!-- tab: URL -->
         <form v-if="tab === 'url'" class="space-y-4 p-5" @submit.prevent="saveFromUrl">
           <div>
-            <label class="label" for="novel-url">URL halaman novel</label>
+            <label class="label" for="novel-url">{{ t('library.novelUrl') }}</label>
             <div class="flex gap-2">
               <input
                 id="novel-url"
                 v-model="urlForm.url"
                 class="input font-mono text-xs"
                 type="url"
-                placeholder="https://www.69shuba.com/book/12345.htm"
+                :placeholder="t('library.urlPlaceholder')"
               />
               <button
                 type="button"
@@ -341,15 +359,14 @@ onMounted(load)
                 :disabled="previewing || !urlForm.url.trim()"
                 @click="doPreview"
               >
-                {{ previewing ? 'Mengambil…' : 'Preview' }}
+                {{ previewing ? t('library.previewing') : t('library.preview') }}
               </button>
             </div>
             <p class="mt-1 text-[11px] text-slate-500">
-              Modul scraper dipilih otomatis dari domain. Domain tak dikenal memakai scraper
-              generik.
+              {{ t('library.scraperHint') }}
             </p>
             <div v-if="supportedScrapers.length" class="mt-2 flex flex-wrap items-center gap-1.5">
-              <span class="text-[11px] text-slate-500">Web didukung:</span>
+              <span class="text-[11px] text-slate-500">{{ t('library.supportedSites') }}</span>
               <span
                 v-for="item in supportedScrapers"
                 :key="item.name"
@@ -362,7 +379,7 @@ onMounted(load)
           </div>
 
           <div>
-            <label class="label" for="url-target">Terjemahkan ke</label>
+            <label class="label" for="url-target">{{ t('library.translateTo') }}</label>
             <select id="url-target" v-model="urlForm.target_lang" class="input">
               <option v-for="lang in targetLangs" :key="lang.value" :value="lang.value">
                 {{ lang.label }}
@@ -383,7 +400,7 @@ onMounted(load)
               <div class="flex flex-wrap items-center gap-2">
                 <span class="badge bg-indigo-950/70 text-indigo-300">{{ preview.scraper }}</span>
                 <span v-if="!preview.dedicated" class="badge bg-amber-950/60 text-amber-400">
-                  generik
+                  {{ t('library.generic') }}
                 </span>
                 <span class="badge bg-ink-800 text-slate-400">{{ preview.kind }}</span>
               </div>
@@ -394,7 +411,7 @@ onMounted(load)
                 v-if="preview.title_translated && preview.title_translated !== preview.title"
                 class="text-[11px] text-slate-500"
               >
-                Asli: {{ preview.title }}
+                {{ t('library.original', { title: preview.title }) }}
               </p>
               <p v-if="preview.author" class="text-xs text-slate-400">{{ preview.author }}</p>
               <p
@@ -405,11 +422,10 @@ onMounted(load)
               </p>
               <p class="mt-2.5 text-xs font-medium text-slate-400">
                 <template v-if="preview.kind === 'novel'">
-                  {{ preview.chapter_count }} bab terdeteksi
+                  {{ t('library.chaptersDetected', { count: preview.chapter_count }) }}
                 </template>
                 <template v-else>
-                  Halaman ini terdeteksi sebagai satu bab ({{ preview.content_length }} karakter),
-                  bukan daftar isi.
+                  {{ t('library.singleChapterDetected', { count: preview.content_length }) }}
                 </template>
               </p>
               <ul
@@ -430,9 +446,11 @@ onMounted(load)
           </div>
 
           <div class="flex justify-end gap-2 pt-1">
-            <button type="button" class="btn-ghost" @click="closeModal">Batal</button>
+            <button type="button" class="btn-ghost" @click="closeModal">
+              {{ t('common.actions.cancel') }}
+            </button>
             <button type="submit" class="btn-primary" :disabled="!canSaveUrl">
-              {{ savingUrl ? 'Menyimpan…' : 'Simpan Novel' }}
+              {{ savingUrl ? t('common.actions.saving') : t('library.saveNovel') }}
             </button>
           </div>
         </form>
@@ -440,28 +458,28 @@ onMounted(load)
         <!-- tab: manual -->
         <form v-else class="space-y-4 p-5" @submit.prevent="saveManual">
           <div>
-            <label class="label" for="manual-title">Judul</label>
+            <label class="label" for="manual-title">{{ t('library.fieldTitle') }}</label>
             <input
               id="manual-title"
               v-model="manualForm.title"
               class="input"
               type="text"
-              placeholder="Judul novel"
+              :placeholder="t('library.titlePlaceholder')"
             />
           </div>
           <div>
-            <label class="label" for="manual-author">Penulis</label>
+            <label class="label" for="manual-author">{{ t('library.fieldAuthor') }}</label>
             <input
               id="manual-author"
               v-model="manualForm.author"
               class="input"
               type="text"
-              placeholder="opsional"
+              :placeholder="t('common.state.optional')"
             />
           </div>
           <div class="grid grid-cols-2 gap-3">
             <div>
-              <label class="label" for="manual-source">Bahasa sumber</label>
+              <label class="label" for="manual-source">{{ t('library.fieldSourceLang') }}</label>
               <select id="manual-source" v-model="manualForm.source_lang" class="input">
                 <option v-for="lang in sourceLangs" :key="lang.value" :value="lang.value">
                   {{ lang.label }}
@@ -469,7 +487,7 @@ onMounted(load)
               </select>
             </div>
             <div>
-              <label class="label" for="manual-target">Terjemahkan ke</label>
+              <label class="label" for="manual-target">{{ t('library.translateTo') }}</label>
               <select id="manual-target" v-model="manualForm.target_lang" class="input">
                 <option v-for="lang in targetLangs" :key="lang.value" :value="lang.value">
                   {{ lang.label }}
@@ -478,22 +496,24 @@ onMounted(load)
             </div>
           </div>
           <div>
-            <label class="label" for="manual-synopsis">Sinopsis</label>
+            <label class="label" for="manual-synopsis">{{ t('library.fieldSynopsis') }}</label>
             <textarea
               id="manual-synopsis"
               v-model="manualForm.synopsis"
               class="input h-24 resize-y"
-              placeholder="opsional"
+              :placeholder="t('common.state.optional')"
             />
           </div>
           <div class="flex justify-end gap-2 pt-1">
-            <button type="button" class="btn-ghost" @click="closeModal">Batal</button>
+            <button type="button" class="btn-ghost" @click="closeModal">
+              {{ t('common.actions.cancel') }}
+            </button>
             <button
               type="submit"
               class="btn-primary"
               :disabled="savingManual || !manualForm.title.trim()"
             >
-              {{ savingManual ? 'Menyimpan…' : 'Simpan Novel' }}
+              {{ savingManual ? t('common.actions.saving') : t('library.saveNovel') }}
             </button>
           </div>
         </form>

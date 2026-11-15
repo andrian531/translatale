@@ -1,25 +1,27 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useI18n } from '@/i18n'
 
 const props = defineProps({
   modelValue: { type: String, default: '' },
   models: { type: Array, default: () => [] },
-  placeholder: { type: String, default: 'Pilih atau ketik nama model' },
-  emptyHint: {
-    type: String,
-    default:
-      'Daftar model belum diambil untuk provider ini. Klik "Ambil Model" atau ketik nama model manual.',
-  },
+  placeholder: { type: String, default: '' },
+  emptyHint: { type: String, default: '' },
   disabled: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['update:modelValue'])
+
+const { t } = useI18n()
 
 const root = ref(null)
 const input = ref(null)
 const open = ref(false)
 const query = ref('')
 const highlighted = ref(-1)
+
+const placeholderText = computed(() => props.placeholder || t('common.modelSelect.placeholder'))
+const emptyHintText = computed(() => props.emptyHint || t('common.modelSelect.emptyHint'))
 
 const options = computed(() => {
   const needle = query.value.trim().toLowerCase()
@@ -115,7 +117,7 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onPointerDownOut
       <input
         ref="input"
         :value="modelValue"
-        :placeholder="placeholder"
+        :placeholder="placeholderText"
         :disabled="disabled"
         class="input !pr-16 font-mono text-xs"
         type="text"
@@ -133,12 +135,15 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onPointerDownOut
           v-if="modelValue"
           type="button"
           class="px-1 text-[11px] text-slate-500 hover:text-slate-200"
-          title="Kosongkan"
+          :title="t('common.modelSelect.clear')"
           @click="clear"
         >
           ✕
         </button>
-        <span class="text-[10px] tabular-nums text-slate-500" :title="`${models.length} model tersimpan`">
+        <span
+          class="text-[10px] tabular-nums text-slate-500"
+          :title="t('common.modelSelect.savedCount', { count: models.length })"
+        >
           {{ models.length }}
         </span>
         <span class="text-[10px] text-slate-500">▾</span>
@@ -150,14 +155,14 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onPointerDownOut
       class="absolute z-30 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-ink-700 bg-ink-900 py-1 shadow-xl shadow-black/40"
     >
       <p v-if="isEmpty" class="px-3 py-2 text-[11px] leading-relaxed text-amber-400">
-        {{ emptyHint }}
+        {{ emptyHintText }}
       </p>
       <template v-else>
         <p
           v-if="!options.length"
           class="px-3 py-2 text-[11px] text-slate-500"
         >
-          Tidak ada model yang cocok. Nama yang kamu ketik tetap dipakai.
+          {{ t('common.modelSelect.noMatch') }}
         </p>
         <button
           v-for="(model, index) in options"

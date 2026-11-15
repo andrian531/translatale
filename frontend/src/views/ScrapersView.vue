@@ -1,6 +1,9 @@
 <script setup>
 import { onMounted, ref } from 'vue'
 import { scrapersApi } from '@/api/scrapers'
+import { useI18n } from '@/i18n'
+
+const { t } = useI18n()
 
 const scrapers = ref([])
 const loading = ref(true)
@@ -59,11 +62,11 @@ onMounted(load)
 <template>
   <div class="mx-auto max-w-6xl px-6 py-8">
     <header class="mb-6">
-      <h1 class="text-2xl font-semibold tracking-tight text-white">Scrapers</h1>
+      <h1 class="text-2xl font-semibold tracking-tight text-strong">{{ t('scrapers.title') }}</h1>
       <p class="mt-1 text-sm text-slate-400">
-        Satu modul per situs. Tambah file di
+        {{ t('scrapers.subtitleBefore') }}
         <code class="rounded bg-ink-800 px-1 py-0.5 text-xs">backend/scrapers/sites/</code>
-        dan modul otomatis terdaftar.
+        {{ t('scrapers.subtitleAfter') }}
       </p>
     </header>
 
@@ -71,10 +74,10 @@ onMounted(load)
       v-if="error"
       class="mb-5 rounded-lg border border-rose-900/60 bg-rose-950/40 px-4 py-3 text-sm text-rose-300"
     >
-      Gagal memuat daftar scraper: {{ error }}
+      {{ t('scrapers.loadFailed', { message: error }) }}
     </div>
 
-    <p v-if="loading" class="text-sm text-slate-500">Memuat…</p>
+    <p v-if="loading" class="text-sm text-slate-500">{{ t('common.actions.loading') }}</p>
 
     <div v-else class="mb-10 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
       <article v-for="scraper in scrapers" :key="scraper.name" class="card space-y-2">
@@ -85,7 +88,7 @@ onMounted(load)
           </span>
         </div>
         <p class="font-mono text-[11px] text-slate-500">
-          {{ scraper.domains.join(', ') || 'semua domain (fallback)' }}
+          {{ scraper.domains.join(', ') || t('scrapers.allDomains') }}
         </p>
         <div class="flex flex-wrap gap-1.5 text-[11px]">
           <span class="badge bg-ink-800 text-slate-300">{{ scraper.source_lang }}</span>
@@ -93,7 +96,7 @@ onMounted(load)
             v-if="scraper.needs_playwright"
             class="badge bg-amber-950/60 text-amber-400"
           >
-            butuh playwright
+            {{ t('scrapers.needsPlaywright') }}
           </span>
           <span v-else class="badge bg-emerald-950/50 text-emerald-400">httpx</span>
         </div>
@@ -103,10 +106,11 @@ onMounted(load)
     <!-- test panel -->
     <section class="card space-y-4">
       <div>
-        <h2 class="text-sm font-semibold text-white">Test Scraper &amp; AI Analyze</h2>
+        <h2 class="text-sm font-semibold text-strong">{{ t('scrapers.testTitle') }}</h2>
         <p class="mt-1 text-xs text-slate-500">
-          Preview memakai modul scraper yang cocok dengan domain. AI Analyze memakai model
-          <span class="font-mono text-slate-400">scrape_analysis</span> dari Settings.
+          {{ t('scrapers.testHintBefore') }}
+          <span class="font-mono text-slate-400">scrape_analysis</span>
+          {{ t('scrapers.testHintAfter') }}
         </p>
       </div>
 
@@ -115,13 +119,13 @@ onMounted(load)
           v-model="url"
           class="input min-w-0 flex-1 font-mono text-xs"
           type="url"
-          placeholder="https://www.69shuba.com/book/12345.htm"
+          :placeholder="t('scrapers.urlPlaceholder')"
         />
         <button class="btn-ghost" :disabled="previewing || !url.trim()" @click="runPreview">
-          {{ previewing ? 'Mengambil…' : 'Test Preview' }}
+          {{ previewing ? t('scrapers.previewing') : t('scrapers.testPreview') }}
         </button>
         <button class="btn-primary" :disabled="analyzing || !url.trim()" @click="runAnalyze">
-          {{ analyzing ? 'Menganalisis…' : 'AI Analyze' }}
+          {{ analyzing ? t('scrapers.analyzing') : t('scrapers.aiAnalyze') }}
         </button>
       </div>
 
@@ -136,17 +140,17 @@ onMounted(load)
         <div class="flex flex-wrap items-center gap-2">
           <span class="badge bg-indigo-950/70 text-indigo-300">{{ preview.scraper }}</span>
           <span v-if="!preview.dedicated" class="badge bg-amber-950/60 text-amber-400">
-            generik
+            {{ t('scrapers.generic') }}
           </span>
           <span class="badge bg-ink-800 text-slate-400">{{ preview.kind }}</span>
         </div>
         <p class="mt-2 font-medium text-slate-100">{{ preview.title }}</p>
         <p v-if="preview.author" class="text-xs text-slate-400">{{ preview.author }}</p>
         <p v-if="preview.kind === 'novel'" class="mt-1 text-xs text-slate-400">
-          {{ preview.chapter_count }} bab terdeteksi
+          {{ t('scrapers.chaptersDetected', { count: preview.chapter_count }) }}
         </p>
         <p v-else class="mt-1 text-xs text-slate-400">
-          {{ preview.content_length }} karakter konten
+          {{ t('scrapers.contentLength', { count: preview.content_length }) }}
         </p>
         <pre
           v-if="preview.content_preview"
