@@ -393,6 +393,8 @@ async def apply_reference_to_chapter(
     )
 
     chunks = chunk_text(existing_translation, max_chars)
+    raw_source = deduplicate_raw_text(chapter.get("raw_content") or "")
+    raw_paras = [p for p in raw_source.split("\n\n") if p.strip()] if raw_source else []
     updated_chunks: list[str] = []
     for index, chunk in enumerate(chunks, start=1):
         await _emit(
@@ -405,7 +407,26 @@ async def apply_reference_to_chapter(
                 "chunk_chars": len(chunk),
             },
         )
-        prompt = APPLY_REFERENCE_PROMPT.format(reference=reference_block, text=chunk)
+        source_block = ""
+        if raw_paras:
+            if len(chunks) == 1:
+                raw_slice = raw_source
+            else:
+                start = (index - 1) * len(raw_paras) // len(chunks)
+                end = index * len(raw_paras) // len(chunks)
+                raw_slice = "\n\n".join(raw_paras[start:end])
+            if raw_slice:
+                source_block = f"[SOURCE TEXT — for term/name disambiguation]\n{raw_slice}\n\n"
+        prompt = APPLY_REFERENCE_PROMPT.format(
+            reference=reference_block,
+            text=f"{source_block}{chunk}" if not source_block else chunk,
+        )
+        if source_block:
+            prompt = (
+                f"{reference_block}\n\n"
+                f"{source_block}"
+                f"[EXISTING TRANSLATION TO ALIGN WITH REFERENCE]\n{chunk}"
+            )
         text = await _generate_chunk_with_retries(
             resolved, prompt, system_prompt, index, len(chunks), fallback=fallback
         )
