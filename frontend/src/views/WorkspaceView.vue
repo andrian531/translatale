@@ -269,6 +269,7 @@ const translatedChaptersCount = computed(
   () => chapters.value.filter((c) => (c.translated_content || '').trim() || c.status === 'translated').length,
 )
 const applyingReference = ref(false)
+const localizingReference = ref(false)
 
 function jobLabel(type) {
   const key = JOB_LABELS[type]
@@ -1006,6 +1007,23 @@ async function saveReference() {
     flash('error', t('workspace.errors.saveReference', { message: err.message }))
   } finally {
     savingReference.value = false
+  }
+}
+
+async function localizeReferenceSheet() {
+  localizingReference.value = true
+  try {
+    if (referenceDirty.value) {
+      await saveReference()
+    }
+    const updated = await translationApi.localizeReference(novelId.value)
+    reference.value = updated
+    referenceDirty.value = false
+    flash('success', t('workspace.notices.referenceLocalized'))
+  } catch (err) {
+    flash('error', err.message || 'Gagal merapikan bahasa referensi')
+  } finally {
+    localizingReference.value = false
   }
 }
 
@@ -1971,6 +1989,17 @@ onBeforeUnmount(stopStream)
           </button>
           <button class="btn-primary" :disabled="savingReference" @click="saveReference">
             {{ savingReference ? t('common.actions.saving') : t('workspace.actions.saveChanges') }}
+          </button>
+          <button
+            class="btn-ghost"
+            :disabled="jobActive || localizingReference || !reference"
+            @click="localizeReferenceSheet"
+          >
+            {{
+              localizingReference
+                ? t('workspace.actions.localizingReference')
+                : t('workspace.actions.localizeReference')
+            }}
           </button>
           <button
             class="btn-ghost"

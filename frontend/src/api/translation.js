@@ -7,6 +7,10 @@ export const translationApi = {
       method: 'PUT',
       body: JSON.stringify(payload),
     }),
+  localizeReference: (novelId) =>
+    request(`/novels/${novelId}/reference/localize`, {
+      method: 'POST',
+    }),
   applyReference: (novelId, chapterIds = null) =>
     request(`/novels/${novelId}/reference/apply`, {
       method: 'POST',

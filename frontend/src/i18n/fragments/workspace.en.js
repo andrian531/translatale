@@ -66,6 +66,8 @@ export default {
     resetTranslation: 'Reset TL',
     runAnalysis: 'Run AI Analysis',
     saveChanges: 'Save Changes',
+    localizeReference: 'Translate Reference to Target (AI)',
+    localizingReference: 'Translating reference…',
     applyToTranslated: 'Apply to Translated Chapters ({count})',
     starting: 'Starting…',
   },
@@ -275,6 +277,7 @@ export default {
     chapterSaved: 'Chapter saved.',
     chapterRemoved: 'Chapter deleted.',
     referenceSaved: 'Reference saved.',
+    referenceLocalized: 'Reference sheet localized to target language.',
   },
   confirm: {
     clearSelected:

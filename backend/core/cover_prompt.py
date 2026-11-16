@@ -9,6 +9,7 @@ from typing import Any
 import database
 from core.analyzer import _generate_analysis_with_fallback
 from core.reference import load_reference
+from core.skills import load_skill
 from llm.base import LLMError, TaskNotConfiguredError, TaskRouter
 
 TASK_NAME = "cover_prompt"
@@ -149,7 +150,7 @@ async def generate_cover_prompt(
             resolved,
             fallback,
             prompt=prompt,
-            system_prompt=COVER_SYSTEM_PROMPT,
+            system_prompt=load_skill("cover_prompt", fallback=COVER_SYSTEM_PROMPT),
             temperature=min(max(resolved.temperature, 0.5), 0.9),
             max_tokens=max(resolved.max_tokens, 1600),
             expect_json=True,

@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 import database
 from core import job_runner
+from core.analyzer import AnalysisError, localize_reference
 from core.cover_prompt import CoverPromptError, generate_cover_prompt
 from core.reference import load_reference, save_reference
 from llm.base import TaskNotConfiguredError, TaskRouter
@@ -109,6 +110,16 @@ def put_reference(novel_id: int, payload: ReferencePayload) -> dict[str, Any]:
     if data.get("chapter_context") is None:
         data["chapter_context"] = existing.get("chapter_context") or []
     return save_reference(novel_id, data)
+
+
+@router.post("/novels/{novel_id}/reference/localize")
+async def localize_novel_reference(novel_id: int) -> dict[str, Any]:
+    _require_novel(novel_id)
+    _require_task("story_analysis")
+    try:
+        return await localize_reference(novel_id)
+    except AnalysisError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 # --------------------------------------------------------------------------

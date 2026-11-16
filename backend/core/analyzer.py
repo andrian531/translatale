@@ -14,6 +14,7 @@ from core.reference import (
     merge_reference,
     save_reference,
 )
+from core.skills import load_skill
 from llm.base import LLMError, ResolvedTask, TaskNotConfiguredError, TaskRouter, looks_like_refusal
 
 TASK_NAME = "story_analysis"
@@ -37,16 +38,16 @@ Return JSON with exactly these keys:
   ],
   "locations": [{{"source": "source-script place", "romanized": "pinyin/romaji/latin reading", "target": "{target_lang} place name", "note": ""}}],
   "terms": [{{"source": "source-script term", "romanized": "pinyin/romaji/latin reading", "target": "{target_lang} term", "note": "why"}}],
-  "translation_guide": "3-6 sentences in English: tone, register, naming rules, honorifics, punctuation"
+  "translation_guide": "3-6 sentences in {target_lang}: tone, register, naming rules, honorifics, punctuation"
 }}
 
 Rules:
 - Only include characters, places and terms that actually appear in the text.
 - `terms` are recurring nouns that must be translated consistently (cultivation
   realms, ranks, techniques, organizations, items).
-- `locations.target` and `terms.target` MUST be written in {target_lang}.
-- Keep `relationships`, `notes`, `note`, and `translation_guide` in English so
-  kinship/hierarchy nuances stay precise for the translator.
+- `locations.target`, `terms.target`, `relationships`, `notes`, `note`, and
+  `translation_guide` MUST be written in {target_lang}. Do NOT output English
+  translations or English guide examples when {target_lang} is not English.
 - `romanized_name` and `romanized` (on locations & terms) must be a real reading
   in Latin letters (pinyin/romaji/Korean romanization), not a guess at the meaning.
 - Keep every string short. Do not invent facts.
@@ -75,8 +76,9 @@ Return JSON with exactly these keys:
 Rules:
 - Return ONLY entries that are not in the existing reference yet, plus aliases or
   relationships of a character that is already listed but lacks them.
-- `locations.target` and `terms.target` MUST be written in {target_lang}; keep
-  `relationships`, `notes`, and `note` in English.
+- `locations.target`, `terms.target`, `relationships`, `notes`, and `note` MUST
+  be written in {target_lang}. Do NOT output English translations when
+  {target_lang} is not English.
 - Never repeat an existing `name` or `source`. If an entry only needs a new alias or
   relationship, return that same `name`/`source` with just the missing field filled.
 - Do not rename, re-translate or contradict anything already in the reference.
@@ -314,7 +316,7 @@ async def analyze_novel(
             resolved,
             fallback,
             prompt=prompt,
-            system_prompt=ANALYSIS_SYSTEM_PROMPT,
+            system_prompt=load_skill("story_analysis", fallback=ANALYSIS_SYSTEM_PROMPT),
             temperature=resolved.temperature,
             max_tokens=resolved.max_tokens,
             expect_json=True,
@@ -421,7 +423,7 @@ async def update_reference_from_chapter(
             resolved,
             fallback,
             prompt=prompt,
-            system_prompt=ANALYSIS_SYSTEM_PROMPT,
+            system_prompt=load_skill("story_analysis", fallback=ANALYSIS_SYSTEM_PROMPT),
             temperature=min(resolved.temperature, 0.3),
             max_tokens=min(resolved.max_tokens, 2000),
             expect_json=True,
@@ -498,7 +500,7 @@ async def summarize_chapter_for_context(
             resolved,
             fallback,
             prompt=prompt,
-            system_prompt=SUMMARY_SYSTEM_PROMPT,
+            system_prompt=load_skill("chapter_summary", fallback=SUMMARY_SYSTEM_PROMPT),
             temperature=min(resolved.temperature, 0.5),
             max_tokens=min(resolved.max_tokens, 800),
             expect_json=False,
@@ -520,3 +522,120 @@ async def summarize_chapter_for_context(
     }
     append_chapter_context(chapter["novel_id"], entry, db_path)
     return entry
+
+
+LOCALIZE_SYSTEM_PROMPT = (
+    "You are a professional literary translator and localization editor. "
+    "Translate all target/note/relationships/notes/translation_guide fields in the "
+    "provided reference JSON into {target_lang}. Preserve all source/name/romanized fields. "
+    "Answer with valid JSON only — no prose, no markdown fences."
+)
+
+LOCALIZE_PROMPT = """Convert the reference sheet below so that every `target`, `note`, `relationships`, `notes`, and `translation_guide` is written in {target_lang}.
+
+[REFERENCE SHEET]
+{reference_json}
+"""
+
+
+async def localize_reference(novel_id: int, db_path: str | None = None) -> dict[str, Any]:
+    """Translate existing reference sheet entries into the novel's target language."""
+    existing = load_reference(novel_id, db_path)
+    has_content = any(
+        [
+            existing.get("characters"),
+            existing.get("locations"),
+            existing.get("terms"),
+            (existing.get("translation_guide") or "").strip(),
+        ]
+    )
+    if not has_content:
+        return existing
+
+    target_lang = _novel_target_lang(novel_id, db_path)
+    router = TaskRouter(TASK_NAME, db_path=db_path)
+    try:
+        resolved = router.resolve()
+    except TaskNotConfiguredError as exc:
+        raise AnalysisError(
+            "Task 'story_analysis' belum dikonfigurasi. Buka Settings → Model Routing "
+            f"per Proses untuk memilih model analisa. ({exc})"
+        ) from exc
+    fallback = router.resolve_fallback()
+
+    payload_obj = {
+        "characters": existing.get("characters") or [],
+        "locations": existing.get("locations") or [],
+        "terms": existing.get("terms") or [],
+        "translation_guide": existing.get("translation_guide") or "",
+    }
+    prompt = LOCALIZE_PROMPT.format(
+        target_lang=target_lang,
+        reference_json=json.dumps(payload_obj, ensure_ascii=False, indent=2),
+    )
+    system_prompt = load_skill(
+        "localize_reference",
+        fallback=LOCALIZE_SYSTEM_PROMPT,
+        target_lang=target_lang,
+    )
+
+    try:
+        raw_text, _used = await _generate_analysis_with_fallback(
+            resolved,
+            fallback,
+            prompt=prompt,
+            system_prompt=system_prompt,
+            max_tokens=max(resolved.max_tokens, 3000),
+            expect_json=True,
+        )
+    except LLMError as exc:
+        raise AnalysisError(f"Lokalisasi referensi gagal: {exc}") from exc
+
+    parsed = _parse_json_object(raw_text)
+
+    def _merge_localized_items(orig_list: list[dict[str, Any]], new_list: Any, key_field: str, fields: tuple[str, ...]) -> list[dict[str, Any]]:
+        if not isinstance(new_list, list):
+            return orig_list
+        by_key: dict[str, dict[str, Any]] = {}
+        for item in new_list:
+            if isinstance(item, dict):
+                k = str(item.get(key_field) or "").strip()
+                if k:
+                    by_key[k] = item
+        merged: list[dict[str, Any]] = []
+        for idx, orig in enumerate(orig_list):
+            copy = dict(orig)
+            k = str(orig.get(key_field) or "").strip()
+            match = by_key.get(k) or (new_list[idx] if idx < len(new_list) and isinstance(new_list[idx], dict) else None)
+            if match:
+                for f in fields:
+                    val = str(match.get(f) or "").strip()
+                    if val:
+                        copy[f] = val
+            merged.append(copy)
+        return merged
+
+    updated = {
+        "characters": _merge_localized_items(
+            existing.get("characters") or [],
+            parsed.get("characters"),
+            "name",
+            ("relationships", "notes"),
+        ),
+        "locations": _merge_localized_items(
+            existing.get("locations") or [],
+            parsed.get("locations"),
+            "source",
+            ("target", "note"),
+        ),
+        "terms": _merge_localized_items(
+            existing.get("terms") or [],
+            parsed.get("terms"),
+            "source",
+            ("target", "note"),
+        ),
+        "translation_guide": str(parsed.get("translation_guide") or "").strip()
+        or (existing.get("translation_guide") or ""),
+        "chapter_context": existing.get("chapter_context") or [],
+    }
+    return save_reference(novel_id, updated, db_path)

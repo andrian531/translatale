@@ -66,6 +66,8 @@ export default {
     resetTranslation: 'Reset TL',
     runAnalysis: 'Run AI Analysis',
     saveChanges: 'Simpan Perubahan',
+    localizeReference: 'Rapikan Bahasa Referensi (AI)',
+    localizingReference: 'Menerjemahkan referensi…',
     applyToTranslated: 'Terapkan ke Bab Terjemahan ({count})',
     starting: 'Memulai…',
   },
@@ -276,6 +278,7 @@ export default {
     chapterSaved: 'Bab disimpan.',
     chapterRemoved: 'Bab dihapus.',
     referenceSaved: 'Reference disimpan.',
+    referenceLocalized: 'Bahasa Reference Sheet berhasil dirapikan ke bahasa target.',
   },
   confirm: {
     clearSelected:

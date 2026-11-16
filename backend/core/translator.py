@@ -11,6 +11,7 @@ from typing import Any, Awaitable, Callable
 import database
 from core.quality import deduplicate_raw_text, score_translation
 from core.reference import load_reference, reference_to_prompt
+from core.skills import load_editor_skill, load_skill
 from llm.base import LLMError, ResolvedTask, TaskNotConfiguredError, TaskRouter, looks_like_refusal
 
 logger = logging.getLogger(__name__)
@@ -255,9 +256,14 @@ async def translate_chapter(
 
     source_lang = novel.get("source_lang") or "zh"
     target_lang = novel.get("target_lang") or "id"
-    system_prompt = TRANSLATE_SYSTEM_PROMPT.format(
-        source=_lang_name(source_lang), target=_lang_name(target_lang)
+    base_skill = load_skill(
+        "translate",
+        fallback=TRANSLATE_SYSTEM_PROMPT,
+        source=_lang_name(source_lang),
+        target=_lang_name(target_lang),
     )
+    editor_skill = load_editor_skill(target_lang)
+    system_prompt = f"{base_skill}\n\n{editor_skill}".strip() if editor_skill else base_skill
 
     chunks = chunk_text(raw, max_chars)
     if not chunks:
@@ -380,7 +386,11 @@ async def apply_reference_to_chapter(
 
     source_lang = novel.get("source_lang") or "zh"
     target_lang = novel.get("target_lang") or "id"
-    system_prompt = APPLY_REFERENCE_SYSTEM_PROMPT.format(target=_lang_name(target_lang))
+    system_prompt = load_skill(
+        "apply_reference",
+        fallback=APPLY_REFERENCE_SYSTEM_PROMPT,
+        target=_lang_name(target_lang),
+    )
 
     chunks = chunk_text(existing_translation, max_chars)
     updated_chunks: list[str] = []

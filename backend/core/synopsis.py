@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 import database
 from core.quality import CJK_RE
 from core.reference import load_reference, reference_to_prompt
+from core.skills import load_skill
 from core.translator import LANG_NAMES
 from llm.base import LLMError, TaskNotConfiguredError, TaskRouter
 
@@ -125,7 +126,9 @@ async def translate_metadata(
     except TaskNotConfiguredError:
         return result
 
-    system = SYSTEM_PROMPT.format(
+    system = load_skill(
+        "synopsis",
+        fallback=SYSTEM_PROMPT,
         source=_lang_name(source_lang, "the source language"),
         target=_lang_name(target_lang, "the target language"),
     )
@@ -197,7 +200,9 @@ async def refine_synopsis(novel_id: int, db_path: str | None = None) -> str:
 
     resolved = TaskRouter(TASK_NAME, db_path=db_path).resolve()
 
-    system = SYSTEM_PROMPT.format(
+    system = load_skill(
+        "synopsis",
+        fallback=SYSTEM_PROMPT,
         source=_lang_name(novel.get("source_lang"), "the source language"),
         target=_lang_name(novel.get("target_lang"), "the target language"),
     )
