@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any, AsyncIterator
 
@@ -13,6 +14,7 @@ import database
 from core import job_runner
 from core.analyzer import AnalysisError, localize_reference
 from core.cover_prompt import CoverPromptError, generate_cover_prompt
+from core.translator import TranslationError, polish_translation_text
 from core.reference import load_reference, save_reference
 from llm.base import TaskNotConfiguredError, TaskRouter
 
@@ -232,6 +234,73 @@ async def start_translation(novel_id: int, payload: TranslatePayload) -> dict[st
 def get_novel_jobs(novel_id: int, limit: int = 20) -> list[dict[str, Any]]:
     _require_novel(novel_id)
     return job_runner.list_jobs(novel_id, limit)
+
+
+class PolishPayload(BaseModel):
+    translated_content: str | None = None
+
+
+@router.post("/chapters/{chapter_id}/polish")
+async def polish_chapter_endpoint(
+    chapter_id: int, payload: PolishPayload | None = None
+) -> dict[str, Any]:
+    _require_task("translate")
+    try:
+        polished = await polish_translation_text(
+            chapter_id,
+            payload.translated_content if payload else None,
+        )
+    except TranslationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"chapter_id": chapter_id, "polished_content": polished}
+
+
+@router.post("/chapters/{chapter_id}/polish/stream")
+async def polish_chapter_stream_endpoint(
+    chapter_id: int, payload: PolishPayload | None = None
+) -> StreamingResponse:
+    _require_task("translate")
+    queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+
+    async def on_progress(event: dict[str, Any]) -> None:
+        await queue.put(event)
+
+    async def runner() -> None:
+        try:
+            polished = await polish_translation_text(
+                chapter_id,
+                payload.translated_content if payload else None,
+                on_progress=on_progress,
+            )
+            await queue.put(
+                {
+                    "type": "done",
+                    "chapter_id": chapter_id,
+                    "polished_content": polished,
+                }
+            )
+        except Exception as exc:
+            await queue.put({"type": "error", "message": str(exc)})
+        finally:
+            await queue.put(None)
+
+    async def stream() -> AsyncIterator[str]:
+        task = asyncio.create_task(runner())
+        try:
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                yield json.dumps(item, ensure_ascii=False) + "\n"
+        finally:
+            if not task.done():
+                task.cancel()
+
+    return StreamingResponse(
+        stream(),
+        media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("/jobs/{job_id}")

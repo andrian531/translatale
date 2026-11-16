@@ -6,6 +6,7 @@ import { readerApi } from '@/api/reader'
 import { settingsApi } from '@/api/settings'
 import { translationApi } from '@/api/translation'
 import LineNumberEditor from '@/components/LineNumberEditor.vue'
+import SplitDiffPreview from '@/components/SplitDiffPreview.vue'
 import { useI18n } from '@/i18n'
 
 const { t } = useI18n()
@@ -720,6 +721,10 @@ async function onFilesChosen(event) {
 const REMOVABLE_ISSUE_CODES = new Set(['promo', 'navigation', 'html_noise'])
 const removedIssueIndices = ref([])
 const dirtyRemovedCount = ref(0)
+const polishing = ref(false)
+const polishProgress = ref({ index: 0, total: 0 })
+const polishPreview = ref(null)
+const polishApplied = ref(false)
 
 const rawFlaggedLines = computed(() =>
   (editing.value?.review_issues || [])
@@ -743,6 +748,41 @@ function openChapter(chapter) {
   editPane.value = 'both'
   removedIssueIndices.value = []
   dirtyRemovedCount.value = 0
+  polishPreview.value = null
+  polishApplied.value = false
+}
+
+async function runPolishPreview() {
+  if (!editing.value || !editForm.translated_content?.trim() || polishing.value) return
+  polishing.value = true
+  polishApplied.value = false
+  polishProgress.value = { index: 0, total: 0 }
+  try {
+    const before = editForm.translated_content
+    const res = await translationApi.polishChapterStream(editing.value.id, before, (ev) => {
+      polishProgress.value = { index: ev.chunk_index || 0, total: ev.chunk_total || 0 }
+    })
+    polishPreview.value = {
+      before,
+      after: res.polished_content || before,
+    }
+  } catch (err) {
+    flash('error', err.message || 'Gagal menjalankan Polish AI')
+  } finally {
+    polishing.value = false
+    polishProgress.value = { index: 0, total: 0 }
+  }
+}
+
+function applyPolishPreview() {
+  if (!polishPreview.value) return
+  editForm.translated_content = polishPreview.value.after
+  polishPreview.value = null
+  polishApplied.value = true
+}
+
+function discardPolishPreview() {
+  polishPreview.value = null
 }
 
 function _stripMatchingLines(text, targets) {
@@ -2614,11 +2654,11 @@ onBeforeUnmount(stopStream)
     <!-- ===================== chapter raw/translated modal ===================== -->
     <div
       v-if="editing"
-      class="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-black/70 p-4 py-8"
+      class="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-black/70 p-4 py-4"
       @click.self="editing = null"
     >
       <form
-        class="w-full max-w-6xl space-y-3 rounded-xl border border-ink-700 bg-ink-900 p-5 shadow-2xl"
+        class="w-full max-w-[95vw] xl:max-w-[1440px] space-y-3 rounded-xl border border-ink-700 bg-ink-900 p-5 shadow-2xl"
         @submit.prevent="saveChapter"
       >
         <div class="flex flex-wrap items-center justify-between gap-2">
@@ -2635,7 +2675,16 @@ onBeforeUnmount(stopStream)
               {{ Math.round(editing.quality_score) }} · {{ gradeFor(editing.quality_score) }}
             </span>
           </h2>
-          <div class="flex items-center gap-1">
+          <div class="flex flex-wrap items-center gap-1.5">
+            <button
+              v-if="editForm.translated_content?.trim()"
+              type="button"
+              class="btn-ghost !px-2.5 !py-1 text-[11px]"
+              :disabled="polishing || savingEdit"
+              @click="runPolishPreview"
+            >
+              {{ polishing ? t('workspace.chapterModal.polishing') : t('workspace.chapterModal.polishButton') }}
+            </button>
             <button
               v-for="pane in ['both', 'raw', 'translated']"
               :key="pane"
@@ -2657,6 +2706,33 @@ onBeforeUnmount(stopStream)
             <button type="button" class="ml-2 text-slate-500 hover:text-slate-200" @click="editing = null">
               ✕
             </button>
+          </div>
+        </div>
+
+        <div
+          v-if="polishing"
+          class="rounded-lg border border-indigo-700/60 bg-indigo-950/30 px-3 py-2 text-xs text-indigo-300"
+        >
+          <div class="mb-1.5 flex items-center justify-between gap-2">
+            <span>
+              {{ t('workspace.chapterModal.polishing') }}
+              <span v-if="polishProgress.total" class="font-mono">
+                (Chunk {{ polishProgress.index }} / {{ polishProgress.total }})
+              </span>
+            </span>
+            <span v-if="polishProgress.total" class="font-mono font-semibold">
+              {{ Math.round((polishProgress.index / polishProgress.total) * 100) }}%
+            </span>
+          </div>
+          <div class="h-1.5 w-full overflow-hidden rounded-full bg-ink-800">
+            <div
+              class="h-full rounded-full bg-indigo-500 transition-all duration-300"
+              :style="{
+                width: polishProgress.total
+                  ? `${Math.round((polishProgress.index / polishProgress.total) * 100)}%`
+                  : '25%',
+              }"
+            />
           </div>
         </div>
 
@@ -2760,7 +2836,44 @@ onBeforeUnmount(stopStream)
           </div>
         </div>
 
-        <div class="grid gap-3" :class="editPane === 'both' ? 'lg:grid-cols-2' : 'grid-cols-1'">
+        <div v-if="polishPreview" class="space-y-2">
+          <div class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-indigo-700/60 bg-indigo-950/30 px-3 py-2 text-xs">
+            <span class="font-medium text-indigo-300">
+              {{ t('workspace.chapterModal.polishPreviewTitle') }}
+            </span>
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                class="btn-ghost !px-2.5 !py-1 text-[11px]"
+                @click="discardPolishPreview"
+              >
+                {{ t('workspace.chapterModal.polishDiscard') }}
+              </button>
+              <button
+                type="button"
+                class="btn-primary !px-2.5 !py-1 text-[11px]"
+                @click="applyPolishPreview"
+              >
+                ✓ {{ t('workspace.chapterModal.polishApply') }}
+              </button>
+            </div>
+          </div>
+          <SplitDiffPreview
+            :before-text="polishPreview.before"
+            :after-text="polishPreview.after"
+            :title="t('workspace.chapterModal.polishPreviewTitle')"
+            :before-label="t('workspace.chapterModal.polishBefore')"
+            :after-label="t('workspace.chapterModal.polishAfter')"
+            :changes-only-label="t('workspace.chapterModal.polishChangesOnly')"
+            :no-changes-label="t('workspace.chapterModal.polishNoChanges')"
+          />
+        </div>
+
+        <p v-if="polishApplied && !polishPreview" class="text-xs font-medium text-emerald-400">
+          ✓ {{ t('workspace.chapterModal.polishAppliedNotice') }}
+        </p>
+
+        <div v-if="!polishPreview" class="grid gap-3" :class="editPane === 'both' ? 'lg:grid-cols-2' : 'grid-cols-1'">
           <div v-if="editPane !== 'translated'">
             <label class="label">
               {{ t('workspace.chapterModal.rawLabel', { count: editForm.raw_content.length }) }}

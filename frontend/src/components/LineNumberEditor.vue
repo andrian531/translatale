@@ -1,7 +1,7 @@
 <template>
   <div
     ref="hostRef"
-    class="cm-line-editor h-80 resize-y overflow-hidden rounded-lg border border-ink-700 bg-ink-950 text-xs focus-within:border-indigo-500"
+    class="cm-line-editor h-[55vh] min-h-[320px] resize-y overflow-hidden rounded-lg border border-ink-700 bg-ink-950 text-xs focus-within:border-indigo-500"
   />
 </template>
 

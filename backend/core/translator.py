@@ -462,3 +462,92 @@ async def apply_reference_to_chapter(
         "provider_type": resolved.provider_type,
         "model": resolved.model,
     }
+
+
+POLISH_SYSTEM_PROMPT = (
+    "You are a senior literary copyeditor working on web novel translations in {target}. "
+    "Refine [EXISTING TRANSLATION TO POLISH] so it reads naturally and smoothly while "
+    "strictly preserving story facts, paragraph breaks, and [REFERENCE SHEET] spellings. "
+    "Output only the polished {target} text."
+)
+
+POLISH_PROMPT = """{reference}
+
+[EXISTING TRANSLATION TO POLISH]
+{text}
+"""
+
+
+async def polish_translation_text(
+    chapter_id: int,
+    translated_text: str | None = None,
+    db_path: str | None = None,
+    max_chars: int = CHUNK_MAX_CHARS,
+    on_progress: ProgressCallback | None = None,
+) -> str:
+    """Copyedit an existing translation in memory (does not write to DB)."""
+    with database.get_conn(db_path) as conn:
+        chap_row = conn.execute(
+            "SELECT * FROM chapters WHERE id = ?", (chapter_id,)
+        ).fetchone()
+        if chap_row is None:
+            raise TranslationError(f"Bab {chapter_id} tidak ditemukan")
+        chapter = dict(chap_row)
+
+        novel_row = conn.execute(
+            "SELECT * FROM novels WHERE id = ?", (chapter["novel_id"],)
+        ).fetchone()
+        if novel_row is None:
+            raise TranslationError(f"Novel untuk bab {chapter_id} tidak ditemukan")
+        novel = dict(novel_row)
+
+    source_text = (
+        translated_text
+        if translated_text is not None
+        else (chapter.get("translated_content") or "")
+    ).strip()
+    if not source_text:
+        raise TranslationError("Teks terjemahan masih kosong untuk dipoles")
+
+    reference = load_reference(chapter["novel_id"], db_path)
+    reference_block = reference_to_prompt(reference) or "(no reference sheet yet)"
+
+    router = TaskRouter(TASK_NAME, db_path=db_path)
+    try:
+        resolved = router.resolve()
+    except TaskNotConfiguredError as exc:
+        raise TranslationError(
+            "Task 'translate' belum dikonfigurasi. Buka Settings → Model Routing "
+            f"per Proses untuk memilih model Translate. ({exc})"
+        ) from exc
+    fallback = router.resolve_fallback()
+
+    target_lang = novel.get("target_lang") or "id"
+    base_skill = load_skill(
+        "polish",
+        fallback=POLISH_SYSTEM_PROMPT,
+        target=_lang_name(target_lang),
+    )
+    editor_skill = load_editor_skill(target_lang)
+    system_prompt = f"{base_skill}\n\n{editor_skill}".strip() if editor_skill else base_skill
+
+    chunks = chunk_text(source_text, max_chars)
+    polished_chunks: list[str] = []
+    for index, chunk in enumerate(chunks, start=1):
+        await _emit(
+            on_progress,
+            {
+                "type": "chunk",
+                "chapter_id": chapter_id,
+                "chunk_index": index,
+                "chunk_total": len(chunks),
+                "chunk_chars": len(chunk),
+            },
+        )
+        prompt = POLISH_PROMPT.format(reference=reference_block, text=chunk)
+        text = await _generate_chunk_with_retries(
+            resolved, prompt, system_prompt, index, len(chunks), fallback=fallback
+        )
+        polished_chunks.append(text)
+
+    return "\n\n".join(polished_chunks)
