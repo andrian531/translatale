@@ -42,9 +42,12 @@ onMounted(async () => {
 
 <template>
   <div class="flex min-h-full flex-col">
-    <header class="border-b border-ink-800 bg-ink-900/80 backdrop-blur">
-      <div class="mx-auto flex max-w-6xl items-center gap-6 px-6 py-3">
-        <RouterLink to="/library" class="flex items-center gap-2">
+    <header class="border-b border-ink-800 bg-ink-900">
+      <div class="mx-auto flex max-w-6xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3 sm:px-6">
+        <RouterLink
+          to="/library"
+          class="flex items-center gap-2 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+        >
           <span
             class="grid h-8 w-8 place-items-center rounded-lg bg-indigo-600 text-sm font-bold text-white"
             >T</span
@@ -54,12 +57,12 @@ onMounted(async () => {
           }}</span>
         </RouterLink>
 
-        <nav class="flex items-center gap-1">
+        <nav class="flex flex-wrap items-center gap-1">
           <RouterLink
             v-for="item in nav"
             :key="item.to"
             :to="item.to"
-            class="rounded-lg px-3 py-1.5 text-sm font-medium transition-colors"
+            class="inline-flex min-h-[36px] items-center rounded-lg px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 sm:min-h-0"
             :class="
               isActive(item)
                 ? 'bg-ink-800 text-strong'
@@ -80,7 +83,7 @@ onMounted(async () => {
               v-for="code in locales"
               :key="code"
               type="button"
-              class="px-2 py-1 font-medium uppercase transition-colors"
+              class="min-h-[36px] px-2.5 py-1 font-medium uppercase transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500 sm:min-h-0 sm:px-2"
               :class="
                 locale === code
                   ? 'bg-indigo-600 text-white'
@@ -96,7 +99,7 @@ onMounted(async () => {
 
           <button
             type="button"
-            class="flex items-center gap-1.5 rounded-lg border border-ink-700 bg-ink-850 px-2 py-1 font-medium text-slate-300 transition-colors hover:bg-ink-800"
+            class="flex min-h-[36px] items-center gap-1.5 rounded-lg border border-ink-700 bg-ink-850 px-2.5 py-1 font-medium text-slate-300 transition-colors hover:bg-ink-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 sm:min-h-0 sm:px-2"
             :title="t('common.theme.label')"
             :aria-label="t('common.theme.label')"
             @click="toggleTheme()"
@@ -140,7 +143,7 @@ onMounted(async () => {
                     : 'bg-rose-500'
               "
             />
-            <span class="text-slate-500">{{ apiLabel }}</span>
+            <span class="text-slate-400">{{ apiLabel }}</span>
           </div>
         </div>
       </div>

@@ -1763,7 +1763,7 @@ onBeforeUnmount(stopStream)
           </button>
         </div>
 
-        <div class="overflow-hidden rounded-xl border border-ink-700">
+        <div class="overflow-x-auto rounded-xl border border-ink-700">
           <table class="w-full text-left text-sm">
             <thead class="bg-ink-850 text-[11px] uppercase tracking-wide text-slate-400">
               <tr>
@@ -1854,7 +1854,7 @@ onBeforeUnmount(stopStream)
                     <button
                       v-if="chapter.needs_review"
                       type="button"
-                      class="inline-flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded-full border border-amber-700/70 bg-amber-950/60 text-[11px] font-bold leading-none text-amber-400 hover:opacity-85"
+                      class="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-full border border-amber-700/70 bg-amber-950/60 text-[11px] font-bold leading-none text-amber-400 hover:opacity-85 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 sm:h-5 sm:w-5"
                       :title="chapter.review_summary || t('workspace.chapterModal.reviewBannerTitle')"
                       :aria-label="t('workspace.chapterModal.needsReviewBadge')"
                       @click="openChapter(chapter)"
@@ -2287,7 +2287,7 @@ onBeforeUnmount(stopStream)
                     <input
                       v-model="term.keep_romanized"
                       type="checkbox"
-                      class="h-3 w-3 accent-indigo-500 focus:outline-none"
+                      class="h-3 w-3 accent-indigo-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
                       :aria-label="t('workspace.reference.keepLatinAria')"
                       @change="markDirty"
                     />
@@ -2402,7 +2402,7 @@ onBeforeUnmount(stopStream)
                     <input
                       v-model="location.keep_romanized"
                       type="checkbox"
-                      class="h-3 w-3 accent-indigo-500 focus:outline-none"
+                      class="h-3 w-3 accent-indigo-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
                       :aria-label="t('workspace.reference.keepLatinAria')"
                       @change="markDirty"
                     />
@@ -2914,7 +2914,7 @@ onBeforeUnmount(stopStream)
     <!-- Modal: warning that earlier chapters are not translated yet -->
     <div
       v-if="contextWarning"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4"
       @click.self="contextWarning = null"
     >
       <div class="card w-full max-w-lg space-y-4 border-amber-800/70">

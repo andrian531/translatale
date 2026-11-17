@@ -57,7 +57,7 @@ html.light {
 
 @layer components {
   .card {
-    @apply rounded-xl border border-ink-700 bg-ink-900 p-5 shadow-lg shadow-black/20;
+    @apply rounded-xl border border-ink-700 bg-ink-900 p-5;
   }
 
   .label {
