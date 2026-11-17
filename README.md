@@ -9,6 +9,7 @@ Translatale (*Translate* + *Tale*) helps you scrape, analyze, translate, copyedi
 [![GitHub Stars](https://img.shields.io/github/stars/andrian531/translatale?style=social)](https://github.com/andrian531/translatale/stargazers)
 [![GitHub Issues](https://img.shields.io/github/issues/andrian531/translatale)](https://github.com/andrian531/translatale/issues)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Latest Release](https://img.shields.io/github/v/release/andrian531/translatale)](https://github.com/andrian531/translatale/releases)
 
 [![Python](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)](https://www.python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
