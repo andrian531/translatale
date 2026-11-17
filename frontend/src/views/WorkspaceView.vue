@@ -391,6 +391,7 @@ function formatJobEventMessage(event) {
 }
 
 const jobMessageMeta = ref(null)
+const activeJobEngine = ref(null)
 const displayJobMessage = computed(() => {
   if (jobMessageMeta.value?.key) {
     return t(`common.jobMessages.${jobMessageMeta.value.key}`, jobMessageMeta.value.params || {})
@@ -409,9 +410,17 @@ function watchJob(jobId) {
   stopStream()
   jobEvents.value = []
   jobMessageMeta.value = null
+  activeJobEngine.value = null
   closeStream = translationApi.subscribeJob(jobId, {
     onEvent(event) {
       jobEvents.value = [...jobEvents.value.slice(-40), event]
+      if (event.provider || event.model) {
+        activeJobEngine.value = {
+          provider: event.provider || '?',
+          model: event.model || '?',
+          isFallback: event.type === 'fallback' || Boolean(event.fallback_used),
+        }
+      }
       if (event.message_key) {
         jobMessageMeta.value = { key: event.message_key, params: event.message_params || {} }
       } else if (event.message) {
@@ -808,7 +817,15 @@ async function runPolishPreview() {
   try {
     const before = editForm.translated_content
     const res = await translationApi.polishChapterStream(editing.value.id, before, (ev) => {
-      polishProgress.value = { index: ev.chunk_index || 0, total: ev.chunk_total || 0 }
+      polishProgress.value = {
+        index: ev.chunk_index || 0,
+        total: ev.chunk_total || 0,
+        engine: ev.type === 'fallback'
+          ? `${ev.fallback_provider || '?'} · ${ev.fallback_model || '?'} (fallback)`
+          : ev.provider || ev.model
+            ? `${ev.provider || '?'} · ${ev.model || '?'}`
+            : '',
+      }
     })
     polishPreview.value = {
       before,
@@ -1594,6 +1611,18 @@ onBeforeUnmount(stopStream)
           <span v-if="jobChunk" class="text-xs text-slate-500">
             {{ t('common.job.chunk', { index: jobChunk.index, total: jobChunk.total }) }}
           </span>
+          <span
+            v-if="activeJobEngine"
+            class="badge font-mono text-[11px]"
+            :class="
+              activeJobEngine.isFallback
+                ? 'bg-amber-950/60 text-amber-400'
+                : 'bg-ink-850 text-slate-300'
+            "
+          >
+            {{ activeJobEngine.provider }} · {{ activeJobEngine.model }}
+            <template v-if="activeJobEngine.isFallback"> (fallback)</template>
+          </span>
           <div class="ml-auto flex gap-2">
             <button
               v-if="jobActive"
@@ -1623,8 +1652,17 @@ onBeforeUnmount(stopStream)
           v-if="jobEvents.length"
           class="mt-2 max-h-28 overflow-y-auto rounded bg-ink-950/60 p-2 font-mono text-[11px] text-slate-500"
         >
-          <div v-for="(event, index) in jobEvents.slice(-12)" :key="index">
-            <span class="text-slate-600">{{ event.type }}</span>
+          <div
+            v-for="(event, index) in jobEvents.slice(-12)"
+            :key="index"
+            :class="event.type === 'fallback' || event.type === 'warning' ? 'text-amber-400' : ''"
+          >
+            <span
+              :class="event.type === 'fallback' || event.type === 'warning' ? 'font-semibold text-amber-300' : 'text-slate-600'"
+            >{{ event.type }}</span>
+            <span v-if="event.provider || event.model" class="text-slate-400">
+              · [{{ event.provider || '?' }} · {{ event.model || '?' }}]
+            </span>
             <span v-if="event.chapter_number">
               · {{ t('common.job.chapter', { number: event.chapter_number }) }}
             </span>
@@ -2768,6 +2806,9 @@ onBeforeUnmount(stopStream)
               {{ t('workspace.chapterModal.polishing') }}
               <span v-if="polishProgress.total" class="font-mono">
                 ({{ t('common.job.chunk', { index: polishProgress.index, total: polishProgress.total }) }})
+              </span>
+              <span v-if="polishProgress.engine" class="ml-1.5 font-mono text-indigo-200/90">
+                [{{ polishProgress.engine }}]
               </span>
             </span>
             <span v-if="polishProgress.total" class="font-mono font-semibold">

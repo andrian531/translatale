@@ -4,7 +4,7 @@
 
 **Penerjemah Web Novel & Light Novel AI berbasis Web dengan Story Bible dan Reader Terintegrasi**
 
-Translatale (*Translate* + *Tale*) membantu Anda mengambil bab (*scraping*), menganalisa cerita, menerjemahkan, menyunting gaya bahasa, dan membaca web novel Mandarin, Jepang, maupun Korea dengan nama karakter, lokasi, serta glosarium yang konsisten — didukung oleh **Gemini, OpenAI, DeepSeek, OpenRouter, Anthropic, Ollama, dan API OpenAI-compatible lainnya**.
+Translatale (*Translate* + *Tale*) membantu Anda mengambil bab (*scraping*), menganalisa cerita, menerjemahkan, menyunting gaya bahasa, dan membaca web novel Mandarin, Jepang, maupun Korea dengan nama karakter, lokasi, serta glosarium yang konsisten — didukung oleh **Gemini, OpenAI, DeepSeek, OpenRouter, Anthropic, Ollama, CLI subscription lokal (`agy` / `codex`), dan API OpenAI-compatible lainnya**.
 
 [![GitHub Stars](https://img.shields.io/github/stars/andrian531/translatale?style=social)](https://github.com/andrian531/translatale/stargazers)
 [![GitHub Issues](https://img.shields.io/github/issues/andrian531/translatale)](https://github.com/andrian531/translatale/issues)
@@ -97,7 +97,7 @@ Translatale (*Translate* + *Tale*) membantu Anda mengambil bab (*scraping*), men
 
 | Fitur | Deskripsi |
 | --- | --- |
-| **7+ Dukungan Provider** | Mendukung **Gemini, OpenAI, DeepSeek, OpenRouter, Anthropic, Ollama**, dan **Custom OpenAI-compatible** lengkap dengan **Test & Ambil Daftar Model** |
+| **7+ Dukungan Provider + CLI Lokal** | Mendukung **Gemini, OpenAI, DeepSeek, OpenRouter, Anthropic, Ollama, Custom OpenAI-compatible**, serta CLI lokal **`agy` (Antigravity CLI)** dan **`codex` (OpenAI Codex CLI)** agar bisa memakai subscription tanpa API key tambahan |
 | **Routing per Proses & Model Cadangan** | Atur model utama + cadangan secara terpisah untuk `translate`, `scrape_analysis`, `story_analysis`, dan `cover_prompt`, plus **Default Provider & Model** |
 | **UI EN / ID & Tema Gelap / Terang** | Penggantian bahasa dan tema secara instan dengan dukungan aksesibilitas keyboard (`focus-visible`) dan tabel responsif |
 

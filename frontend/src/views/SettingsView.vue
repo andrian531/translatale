@@ -56,6 +56,18 @@ const isEditing = computed(() => form.id !== null)
 const keyRequired = computed(() => currentType.value?.requires_api_key !== false)
 const hasProviders = computed(() => providers.value.length > 0)
 const isCustom = computed(() => form.provider_type === 'custom')
+const isCliProvider = computed(() => form.provider_type === 'agy' || form.provider_type === 'codex')
+const cliStatus = computed(() => meta.value.cli_status ?? {})
+
+function isCliType(type) {
+  return type === 'agy' || type === 'codex'
+}
+
+function selectCliProvider(engine) {
+  form.id = null
+  form.provider_type = engine
+  onTypeChange()
+}
 //: A Custom provider must be named by the user, otherwise several of them
 //: collapse into the same generic label in the routing dropdowns.
 const nameMissing = computed(() => isCustom.value && !form.display_name.trim())
@@ -110,6 +122,41 @@ function modelsForTask(task) {
 function fallbackModelsForTask(task) {
   const draft = taskDrafts[task.task_name]
   return providerById(draft?.fallback_provider_id)?.available_models ?? []
+}
+
+function onTaskProviderChange(taskName) {
+  const draft = taskDrafts[taskName]
+  if (!draft) return
+  const provider = providerById(draft.provider_id)
+  if (!provider) {
+    draft.model_name = ''
+    return
+  }
+  const available = provider.available_models ?? []
+  if (!available.includes(draft.model_name)) {
+    draft.model_name = provider.default_model || ''
+  }
+}
+
+function onTaskFallbackProviderChange(taskName) {
+  const draft = taskDrafts[taskName]
+  if (!draft) return
+  const provider = providerById(draft.fallback_provider_id)
+  if (!provider) {
+    draft.fallback_model_name = ''
+    return
+  }
+  const available = provider.available_models ?? []
+  if (!available.includes(draft.fallback_model_name)) {
+    draft.fallback_model_name = provider.default_model || ''
+  }
+}
+
+function isModelMismatched(providerId, modelName) {
+  const name = (modelName || '').trim()
+  if (!providerId || !name) return false
+  const available = providerById(providerId)?.available_models ?? []
+  return available.length > 0 && !available.includes(name)
 }
 
 function providerLabel(type) {
@@ -465,11 +512,40 @@ onMounted(loadAll)
     <template v-else>
       <!-- ============================ PROVIDERS ============================ -->
       <section class="mb-12">
-        <div class="mb-4 flex items-baseline justify-between">
+        <div class="mb-4 flex flex-wrap items-center justify-between gap-2">
           <h2 class="text-lg font-semibold text-strong">{{ t('settings.providers.title') }}</h2>
-          <span class="text-xs text-slate-500">
-            {{ t('settings.providers.savedCount', { count: providers.length }) }}
-          </span>
+          <div class="flex flex-wrap items-center gap-2 text-xs">
+            <span class="text-slate-400">{{ t('settings.providers.cliSectionLabel') }}</span>
+            <button
+              v-for="engine in ['agy', 'codex']"
+              :key="engine"
+              type="button"
+              class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors"
+              :class="
+                cliStatus[engine]?.available
+                  ? 'border-emerald-900/60 bg-emerald-950/40 text-emerald-400 hover:bg-emerald-950/60'
+                  : 'border-ink-700 bg-ink-850 text-slate-400'
+              "
+              :title="cliStatus[engine]?.path || t('settings.providers.cliMissing')"
+              @click="selectCliProvider(engine)"
+            >
+              <span
+                class="h-1.5 w-1.5 rounded-full"
+                :class="cliStatus[engine]?.available ? 'bg-emerald-400' : 'bg-slate-500'"
+              />
+              <span>{{ shortTypeLabel(engine) }}:</span>
+              <span>
+                {{
+                  cliStatus[engine]?.available
+                    ? t('settings.providers.cliReady')
+                    : t('settings.providers.cliMissing')
+                }}
+              </span>
+            </button>
+            <span class="text-slate-500">
+              · {{ t('settings.providers.savedCount', { count: providers.length }) }}
+            </span>
+          </div>
         </div>
 
         <div class="grid gap-6 lg:grid-cols-[minmax(0,400px)_minmax(0,1fr)]">
@@ -490,7 +566,24 @@ onMounted(loadAll)
             </div>
 
             <div>
-              <label class="label" for="provider-type">{{ t('settings.providers.type') }}</label>
+              <div class="mb-1.5 flex items-center justify-between gap-2">
+                <label class="label !mb-0" for="provider-type">{{ t('settings.providers.type') }}</label>
+                <span
+                  v-if="isCliProvider"
+                  class="badge"
+                  :class="
+                    cliStatus[form.provider_type]?.available
+                      ? 'bg-emerald-950/60 text-emerald-400'
+                      : 'bg-amber-950/60 text-amber-400'
+                  "
+                >
+                  {{
+                    cliStatus[form.provider_type]?.available
+                      ? t('settings.providers.cliReady')
+                      : t('settings.providers.cliMissing')
+                  }}
+                </span>
+              </div>
               <select
                 id="provider-type"
                 v-model="form.provider_type"
@@ -498,7 +591,7 @@ onMounted(loadAll)
                 @change="onTypeChange"
               >
                 <option v-for="type in providerTypes" :key="type.value" :value="type.value">
-                  {{ providerLabel(type.value) }}
+                  {{ providerLabel(type.value) }}{{ isCliType(type.value) ? ` — ${type.cli_available ? t('settings.providers.cliReady') : t('settings.providers.cliMissing')}` : '' }}
                 </option>
               </select>
             </div>
@@ -530,7 +623,7 @@ onMounted(loadAll)
               </p>
             </div>
 
-            <div>
+            <div v-if="!isCliProvider">
               <label class="label" for="api-key">
                 {{ t('settings.providers.apiKey') }}
                 <span v-if="!keyRequired" class="normal-case text-slate-500">
@@ -553,18 +646,27 @@ onMounted(loadAll)
                 {{ t('settings.providers.apiKeyHintBefore') }}<code class="text-slate-400">****1234</code>{{ t('settings.providers.apiKeyHintAfter') }}
               </p>
             </div>
+            <p v-else class="rounded-lg border border-ink-700 bg-ink-850 px-3 py-2 text-[11px] text-slate-400">
+              {{ t('settings.providers.cliKeylessHint') }}
+            </p>
 
             <div>
-              <label class="label" for="base-url">{{ t('settings.providers.baseUrl') }}</label>
+              <label class="label" for="base-url">
+                {{ isCliProvider ? t('settings.providers.cliPathLabel') : t('settings.providers.baseUrl') }}
+              </label>
               <input
                 id="base-url"
                 v-model="form.base_url"
                 class="input font-mono text-xs"
                 type="text"
-                placeholder="https://…"
+                :placeholder="
+                  isCliProvider
+                    ? (cliStatus[form.provider_type]?.path || t('settings.providers.cliPathPlaceholder'))
+                    : 'https://…'
+                "
               />
               <p class="mt-1 text-[11px] text-slate-500">
-                {{ t('settings.providers.baseUrlHint') }}
+                {{ isCliProvider ? t('settings.providers.cliPathHint') : t('settings.providers.baseUrlHint') }}
               </p>
             </div>
 
@@ -722,9 +824,28 @@ onMounted(loadAll)
                       class="badge bg-amber-950/60 text-amber-400"
                       >{{ t('settings.providers.disabledBadge') }}</span
                     >
+                    <span
+                      v-if="isCliType(provider.provider_type)"
+                      class="badge"
+                      :class="
+                        cliStatus[provider.provider_type]?.available
+                          ? 'bg-emerald-950/60 text-emerald-400'
+                          : 'bg-amber-950/60 text-amber-400'
+                      "
+                    >
+                      {{
+                        cliStatus[provider.provider_type]?.available
+                          ? t('settings.providers.cliReady')
+                          : t('settings.providers.cliMissing')
+                      }}
+                    </span>
                   </div>
                   <p class="mt-1 font-mono text-[11px] text-slate-500">
-                    {{ provider.base_url || '—' }}
+                    {{
+                      isCliType(provider.provider_type)
+                        ? (provider.base_url || cliStatus[provider.provider_type]?.path || t('settings.providers.cliPathPlaceholder'))
+                        : (provider.base_url || '—')
+                    }}
                   </p>
                 </div>
                 <div class="flex flex-wrap items-center gap-2">
@@ -763,7 +884,7 @@ onMounted(loadAll)
                 </div>
               </div>
 
-              <div class="flex items-center gap-2 text-xs">
+              <div v-if="!isCliType(provider.provider_type)" class="flex items-center gap-2 text-xs">
                 <span class="text-slate-500">{{ t('settings.providers.apiKey') }}</span>
                 <code
                   class="rounded bg-ink-850 px-2 py-0.5 font-mono text-slate-300"
@@ -771,6 +892,9 @@ onMounted(loadAll)
                 >
                   {{ provider.api_key || t('settings.providers.apiKeyEmpty') }}
                 </code>
+              </div>
+              <div v-else class="flex items-center gap-2 text-xs">
+                <span class="text-slate-400">{{ t('settings.providers.cliAuthValue') }}</span>
               </div>
 
               <p
@@ -851,6 +975,7 @@ onMounted(loadAll)
                 :id="`provider-${task.task_name}`"
                 v-model="taskDrafts[task.task_name].provider_id"
                 class="input"
+                @change="onTaskProviderChange(task.task_name)"
               >
                 <option :value="null">{{ t('settings.tasks.providerNone') }}</option>
                 <option v-for="provider in providers" :key="provider.id" :value="provider.id">
@@ -875,6 +1000,12 @@ onMounted(loadAll)
                     : t('settings.tasks.modelEmptyHintNoProvider')
                 "
               />
+              <p
+                v-if="isModelMismatched(taskDrafts[task.task_name].provider_id, taskDrafts[task.task_name].model_name)"
+                class="mt-1 text-[11px] text-amber-400"
+              >
+                ⚠ {{ t('settings.tasks.modelMismatchWarning') }}
+              </p>
               <div class="mt-2 flex items-center gap-2">
                 <button
                   type="button"
@@ -943,6 +1074,7 @@ onMounted(loadAll)
                   :id="`fb-provider-${task.task_name}`"
                   v-model="taskDrafts[task.task_name].fallback_provider_id"
                   class="input"
+                  @change="onTaskFallbackProviderChange(task.task_name)"
                 >
                   <option :value="null">{{ t('settings.tasks.fallbackNone') }}</option>
                   <option v-for="provider in providers" :key="provider.id" :value="provider.id">
@@ -966,6 +1098,12 @@ onMounted(loadAll)
                       : t('settings.tasks.fallbackEmptyHintNoProvider')
                   "
                 />
+                <p
+                  v-if="isModelMismatched(taskDrafts[task.task_name].fallback_provider_id, taskDrafts[task.task_name].fallback_model_name)"
+                  class="mt-1 text-[11px] text-amber-400"
+                >
+                  ⚠ {{ t('settings.tasks.modelMismatchWarning') }}
+                </p>
               </div>
             </div>
 

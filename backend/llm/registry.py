@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from llm.anthropic_provider import AnthropicProvider
 from llm.base import BaseLLMProvider, LLMError
+from llm.cli_provider import CliLLMProvider
 from llm.gemini_provider import GeminiProvider
 from llm.openai_compat import OpenAICompatibleProvider
 
@@ -16,6 +17,8 @@ PROVIDER_CLASSES: dict[str, type[BaseLLMProvider]] = {
     "custom": OpenAICompatibleProvider,
     "ollama": OpenAICompatibleProvider,
     "anthropic": AnthropicProvider,
+    "agy": CliLLMProvider,
+    "codex": CliLLMProvider,
 }
 
 
@@ -34,7 +37,7 @@ def create_provider(
     if cls is None:
         raise LLMError(f"Unsupported provider type: {provider_type}")
 
-    if cls is OpenAICompatibleProvider:
+    if cls in (OpenAICompatibleProvider, CliLLMProvider):
         return cls(
             api_key=api_key,
             base_url=base_url,

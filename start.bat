@@ -88,8 +88,29 @@ if "%NEED_NPM%"=="1" (
     echo [3/4] Dependensi frontend sudah siap.
 )
 
-:: 5. Run single-window launcher (BE + FE with [BE] / [FE] prefixes)
-echo [4/4] Menjalankan Backend ^& Frontend dalam 1 window...
+:: 5. Check optional local CLI subscriptions (agy / codex)
+echo [4/5] Memeriksa CLI AI lokal ^(opsional^)...
+set "AGY_READY=0"
+where agy >nul 2>&1 && set "AGY_READY=1"
+if "%AGY_READY%"=="0" if exist "%LOCALAPPDATA%\agy\bin\agy.exe" set "AGY_READY=1"
+if "%AGY_READY%"=="1" (
+    echo     [CLI] agy ^(Antigravity CLI^)   : READY
+) else (
+    echo     [CLI] agy ^(Antigravity CLI^)   : tidak ditemukan ^(opsional^)
+)
+
+set "CODEX_READY=0"
+where codex >nul 2>&1 && set "CODEX_READY=1"
+if "%CODEX_READY%"=="0" if exist "%LOCALAPPDATA%\Programs\OpenAI\Codex\bin\codex.exe" set "CODEX_READY=1"
+if "%CODEX_READY%"=="1" (
+    echo     [CLI] codex ^(OpenAI Codex CLI^): READY
+) else (
+    echo     [CLI] codex ^(OpenAI Codex CLI^): tidak ditemukan ^(opsional^)
+)
+echo.
+
+:: 6. Run single-window launcher (BE + FE with [BE] / [FE] prefixes)
+echo [5/5] Menjalankan Backend ^& Frontend dalam 1 window...
 echo.
 "%ROOT_DIR%backend\.venv\Scripts\python.exe" "%ROOT_DIR%launcher.py"
 

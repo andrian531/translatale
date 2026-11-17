@@ -57,6 +57,15 @@ export default {
     defaultModelRequired: 'Model default wajib diisi sebelum menyimpan.',
     setAsDefault: 'Jadikan provider default (dipakai jika slot proses belum diisi)',
     defaultBadge: 'default',
+    cliSectionLabel: 'Subscription CLI Lokal:',
+    cliReady: 'CLI Ready',
+    cliMissing: 'Tidak ditemukan',
+    cliUseHint: 'Klik untuk pilih',
+    cliKeylessHint: 'Memakai login subscription CLI lokal — tidak butuh API key.',
+    cliPathLabel: 'Path executable CLI (opsional)',
+    cliPathPlaceholder: 'Otomatis terdeteksi dari PATH',
+    cliPathHint: 'Kosongkan untuk memakai binary yang terdeteksi di PATH.',
+    cliAuthValue: 'Login subscription CLI lokal',
   },
 
   tasks: {
@@ -86,6 +95,7 @@ export default {
     saved: 'tersimpan ✓',
     notConfigured: 'belum dikonfigurasi',
     usingDefaultHint: 'Memakai default: {provider} · {model}',
+    modelMismatchWarning: 'Model yang dipilih tidak ada di daftar model provider ini.',
     flashSaveFailed: 'Gagal menyimpan routing {label}: {message}',
   },
 
@@ -111,6 +121,8 @@ export default {
     anthropic: 'Anthropic',
     custom: 'Custom (OpenAI-compatible)',
     ollama: 'Ollama',
+    agy: 'Antigravity CLI (agy)',
+    codex: 'OpenAI Codex CLI (codex)',
   },
 
   providerTypesShort: {
@@ -121,6 +133,8 @@ export default {
     anthropic: 'Anthropic',
     custom: 'Custom',
     ollama: 'Ollama',
+    agy: 'agy CLI',
+    codex: 'Codex CLI',
   },
 
   taskNames: {

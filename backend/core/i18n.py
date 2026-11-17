@@ -58,8 +58,16 @@ JOB_MESSAGES: dict[str, dict[str, str]] = {
         "id": "Menganalisis cerita…",
     },
     "reference_updated": {
-        "en": "Reference updated: {counts}",
-        "id": "Referensi diperbarui: {counts}",
+        "en": "Reference updated [{engine}]: {counts}",
+        "id": "Referensi diperbarui [{engine}]: {counts}",
+    },
+    "analysis_fallback": {
+        "en": "Story analysis primary ({primary}) failed — switched to fallback ({fallback})",
+        "id": "Analisa cerita model utama ({primary}) gagal — pindah ke fallback ({fallback})",
+    },
+    "fallback_switched": {
+        "en": "Chunk {index}/{total} primary ({primary}) failed ({reason}) — using fallback ({fallback})",
+        "id": "Chunk {index}/{total} model utama ({primary}) gagal ({reason}) — pakai fallback ({fallback})",
     },
     "summarizing_chapter": {
         "en": "Summarising chapter {number}…",
@@ -106,16 +114,16 @@ JOB_MESSAGES: dict[str, dict[str, str]] = {
         "id": "Menerjemahkan Bab {label}: {title} ({completed}/{total})",
     },
     "translating_title": {
-        "en": "Chapter {label} — translating title…",
-        "id": "Bab {label} — menerjemahkan judul…",
+        "en": "Chapter {label} — translating title [{engine}]…",
+        "id": "Bab {label} — menerjemahkan judul [{engine}]…",
     },
     "chunk_progress": {
-        "en": "Chapter {label} — chunk {index}/{total} ({chars} chars)",
-        "id": "Bab {label} — chunk {index}/{total} ({chars} kar)",
+        "en": "Chapter {label} — chunk {index}/{total} ({chars} chars) [{engine}]",
+        "id": "Bab {label} — chunk {index}/{total} ({chars} kar) [{engine}]",
     },
     "chapter_done_score": {
-        "en": "Chapter {label} done ({completed}/{total}) — score {score} ({grade})",
-        "id": "Bab {label} selesai ({completed}/{total}) — skor {score} ({grade})",
+        "en": "Chapter {label} done ({completed}/{total}) — score {score} ({grade}) [{engine}]",
+        "id": "Bab {label} selesai ({completed}/{total}) — skor {score} ({grade}) [{engine}]",
     },
     "init_apply_ref": {
         "en": "0/{total} chapters (parallel {workers}x)",
@@ -126,16 +134,16 @@ JOB_MESSAGES: dict[str, dict[str, str]] = {
         "id": "Menyesuaikan bab {label}: {title}",
     },
     "chunk_short": {
-        "en": "Chapter {label} — chunk {index}/{total}",
-        "id": "Bab {label} — chunk {index}/{total}",
+        "en": "Chapter {label} — chunk {index}/{total} [{engine}]",
+        "id": "Bab {label} — chunk {index}/{total} [{engine}]",
     },
     "align_failed": {
         "en": "Chapter {label} failed to align: {error}",
         "id": "Bab {label} gagal disesuaikan: {error}",
     },
     "chapter_aligned_score": {
-        "en": "Chapter {label} updated ({completed}/{total}) — score {score} ({grade})",
-        "id": "Bab {label} diperbarui ({completed}/{total}) — skor {score} ({grade})",
+        "en": "Chapter {label} updated ({completed}/{total}) — score {score} ({grade}) [{engine}]",
+        "id": "Bab {label} diperbarui ({completed}/{total}) — skor {score} ({grade}) [{engine}]",
     },
 }
 

@@ -200,10 +200,13 @@ async def _generate_chunk_with_retries(
     index: int,
     total_chunks: int,
     fallback: ResolvedTask | None = None,
-) -> str:
+    on_progress: ProgressCallback | None = None,
+    chapter_id: int | None = None,
+) -> tuple[str, ResolvedTask]:
     """Call primary LLM for a chunk; fall back to secondary model if primary fails/refuses."""
     try:
-        return await _try_resolved_chunk(resolved, prompt, system_prompt, index, total_chunks)
+        text = await _try_resolved_chunk(resolved, prompt, system_prompt, index, total_chunks)
+        return text, resolved
     except TranslationError as primary_exc:
         if fallback is None:
             raise
@@ -215,7 +218,22 @@ async def _generate_chunk_with_retries(
             primary_exc,
             fallback.model,
         )
-        return await _try_resolved_chunk(fallback, prompt, system_prompt, index, total_chunks)
+        await _emit(
+            on_progress,
+            {
+                "type": "fallback",
+                "chapter_id": chapter_id,
+                "chunk_index": index,
+                "chunk_total": total_chunks,
+                "primary_provider": resolved.provider_name or resolved.provider_type,
+                "primary_model": resolved.model,
+                "fallback_provider": fallback.provider_name or fallback.provider_type,
+                "fallback_model": fallback.model,
+                "reason": str(primary_exc)[:200],
+            },
+        )
+        text = await _try_resolved_chunk(fallback, prompt, system_prompt, index, total_chunks)
+        return text, fallback
 
 
 async def translate_chapter(
@@ -269,13 +287,20 @@ async def translate_chapter(
     if not chunks:
         raise TranslationError(f"Bab {chapter_id} tidak menghasilkan chunk")
 
+    provider_label = resolved.provider_name or resolved.provider_type
+
     # -- title ---------------------------------------------------------
     title_translated = chapter.get("title_translated") or ""
     title = (chapter.get("title") or "").strip()
     if title:
         await _emit(
             on_progress,
-            {"type": "title", "chapter_id": chapter_id},
+            {
+                "type": "title",
+                "chapter_id": chapter_id,
+                "provider": provider_label,
+                "model": resolved.model,
+            },
         )
         try:
             title_response = await resolved.provider.generate(
@@ -293,6 +318,8 @@ async def translate_chapter(
     # -- body ----------------------------------------------------------
     translated_chunks: list[str] = []
     rolling = ""
+    last_used = resolved
+    fallback_used = False
     for index, chunk in enumerate(chunks, start=1):
         await _emit(
             on_progress,
@@ -302,6 +329,8 @@ async def translate_chapter(
                 "chunk_index": index,
                 "chunk_total": len(chunks),
                 "chunk_chars": len(chunk),
+                "provider": provider_label,
+                "model": resolved.model,
             },
         )
         prompt = CHUNK_PROMPT.format(
@@ -309,9 +338,19 @@ async def translate_chapter(
             rolling=rolling or "(start of chapter)",
             text=chunk,
         )
-        text = await _generate_chunk_with_retries(
-            resolved, prompt, system_prompt, index, len(chunks), fallback=fallback
+        text, used_task = await _generate_chunk_with_retries(
+            resolved,
+            prompt,
+            system_prompt,
+            index,
+            len(chunks),
+            fallback=fallback,
+            on_progress=on_progress,
+            chapter_id=chapter_id,
         )
+        last_used = used_task
+        if used_task is not resolved:
+            fallback_used = True
         translated_chunks.append(text)
         rolling = _tail(text)
 
@@ -341,8 +380,10 @@ async def translate_chapter(
         "chunks": len(chunks),
         "translated_chars": len(translated),
         "quality": quality,
-        "provider_type": resolved.provider_type,
-        "model": resolved.model,
+        "provider_type": last_used.provider_type,
+        "provider_name": last_used.provider_name or last_used.provider_type,
+        "model": last_used.model,
+        "fallback_used": fallback_used,
     }
 
 
@@ -392,10 +433,13 @@ async def apply_reference_to_chapter(
         target=_lang_name(target_lang),
     )
 
+    provider_label = resolved.provider_name or resolved.provider_type
     chunks = chunk_text(existing_translation, max_chars)
     raw_source = deduplicate_raw_text(chapter.get("raw_content") or "")
     raw_paras = [p for p in raw_source.split("\n\n") if p.strip()] if raw_source else []
     updated_chunks: list[str] = []
+    last_used = resolved
+    fallback_used = False
     for index, chunk in enumerate(chunks, start=1):
         await _emit(
             on_progress,
@@ -405,6 +449,8 @@ async def apply_reference_to_chapter(
                 "chunk_index": index,
                 "chunk_total": len(chunks),
                 "chunk_chars": len(chunk),
+                "provider": provider_label,
+                "model": resolved.model,
             },
         )
         source_block = ""
@@ -427,9 +473,19 @@ async def apply_reference_to_chapter(
                 f"{source_block}"
                 f"[EXISTING TRANSLATION TO ALIGN WITH REFERENCE]\n{chunk}"
             )
-        text = await _generate_chunk_with_retries(
-            resolved, prompt, system_prompt, index, len(chunks), fallback=fallback
+        text, used_task = await _generate_chunk_with_retries(
+            resolved,
+            prompt,
+            system_prompt,
+            index,
+            len(chunks),
+            fallback=fallback,
+            on_progress=on_progress,
+            chapter_id=chapter_id,
         )
+        last_used = used_task
+        if used_task is not resolved:
+            fallback_used = True
         updated_chunks.append(text)
 
     updated_translation = "\n\n".join(updated_chunks)
@@ -459,8 +515,10 @@ async def apply_reference_to_chapter(
         "chunks": len(chunks),
         "translated_chars": len(updated_translation),
         "quality": quality,
-        "provider_type": resolved.provider_type,
-        "model": resolved.model,
+        "provider_type": last_used.provider_type,
+        "provider_name": last_used.provider_name or last_used.provider_type,
+        "model": last_used.model,
+        "fallback_used": fallback_used,
     }
 
 
@@ -531,6 +589,7 @@ async def polish_translation_text(
     editor_skill = load_editor_skill(target_lang)
     system_prompt = f"{base_skill}\n\n{editor_skill}".strip() if editor_skill else base_skill
 
+    provider_label = resolved.provider_name or resolved.provider_type
     chunks = chunk_text(source_text, max_chars)
     polished_chunks: list[str] = []
     for index, chunk in enumerate(chunks, start=1):
@@ -542,11 +601,20 @@ async def polish_translation_text(
                 "chunk_index": index,
                 "chunk_total": len(chunks),
                 "chunk_chars": len(chunk),
+                "provider": provider_label,
+                "model": resolved.model,
             },
         )
         prompt = POLISH_PROMPT.format(reference=reference_block, text=chunk)
-        text = await _generate_chunk_with_retries(
-            resolved, prompt, system_prompt, index, len(chunks), fallback=fallback
+        text, _used = await _generate_chunk_with_retries(
+            resolved,
+            prompt,
+            system_prompt,
+            index,
+            len(chunks),
+            fallback=fallback,
+            on_progress=on_progress,
+            chapter_id=chapter_id,
         )
         polished_chunks.append(text)
 

@@ -57,6 +57,15 @@ export default {
     defaultModelRequired: 'Default model is required before saving.',
     setAsDefault: 'Set as default provider (used when a task slot is unset)',
     defaultBadge: 'default',
+    cliSectionLabel: 'Local CLI Subscriptions:',
+    cliReady: 'CLI Ready',
+    cliMissing: 'Not found',
+    cliUseHint: 'Click to select',
+    cliKeylessHint: 'Uses your local CLI subscription login — no API key needed.',
+    cliPathLabel: 'CLI executable path (optional)',
+    cliPathPlaceholder: 'Auto-detected from PATH',
+    cliPathHint: 'Leave blank to use the binary detected on PATH.',
+    cliAuthValue: 'Local CLI subscription',
   },
 
   tasks: {
@@ -86,6 +95,7 @@ export default {
     saved: 'saved ✓',
     notConfigured: 'not configured',
     usingDefaultHint: 'Using default: {provider} · {model}',
+    modelMismatchWarning: 'Selected model is not in this provider’s saved model list.',
     flashSaveFailed: 'Could not save routing for {label}: {message}',
   },
 
@@ -111,6 +121,8 @@ export default {
     anthropic: 'Anthropic',
     custom: 'Custom (OpenAI-compatible)',
     ollama: 'Ollama',
+    agy: 'Antigravity CLI (agy)',
+    codex: 'OpenAI Codex CLI (codex)',
   },
 
   providerTypesShort: {
@@ -121,6 +133,8 @@ export default {
     anthropic: 'Anthropic',
     custom: 'Custom',
     ollama: 'Ollama',
+    agy: 'agy CLI',
+    codex: 'Codex CLI',
   },
 
   taskNames: {

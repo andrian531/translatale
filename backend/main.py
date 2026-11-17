@@ -19,7 +19,7 @@ from core import job_runner
 from core.i18n import reset_ui_lang, set_ui_lang
 from routers import projects, reader, scrapers, settings, translation
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 
 @asynccontextmanager

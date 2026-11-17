@@ -361,8 +361,12 @@ async def analyze_novel(
             }
             for chapter in chapters
         ],
-        "provider_type": resolved.provider_type,
-        "model": resolved.model,
+        "provider_type": used.provider_type,
+        "provider_name": used.provider_name or used.provider_type,
+        "model": used.model,
+        "primary_provider": resolved.provider_name or resolved.provider_type,
+        "primary_model": resolved.model,
+        "fallback_used": used is not resolved,
         "counts": {
             "characters": len(saved.get("characters") or []),
             "locations": len(saved.get("locations") or []),

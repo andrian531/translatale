@@ -334,13 +334,29 @@ async def _run_analysis(
 
     result = await analyze_novel(novel_id, chapter_ids, db_path)
     analyzed = result["chapters_analyzed"]
+    engine = f"{result.get('provider_name') or result.get('provider_type') or '?'} · {result.get('model') or '?'}"
+    if result.get("fallback_used"):
+        primary = f"{result.get('primary_provider') or '?'} · {result.get('primary_model') or '?'}"
+        fb_ev = _msg("analysis_fallback", lang, primary=primary, fallback=engine)
+        logger.warning("[Job %s] %s", job_id, fb_ev["message"])
+        _publish(
+            job_id,
+            {
+                "type": "fallback",
+                "provider": result.get("provider_name") or result.get("provider_type"),
+                "model": result.get("model"),
+                **fb_ev,
+            },
+        )
 
     _update_job(job_id, total_items=len(analyzed) or 1)
     _publish(
         job_id,
         {
             "type": "progress",
-            **_msg("reference_updated", lang, counts=result["counts"]),
+            "provider": result.get("provider_name") or result.get("provider_type"),
+            "model": result.get("model"),
+            **_msg("reference_updated", lang, engine=engine, counts=result["counts"]),
             "total_items": len(analyzed) or 1,
             "completed_items": 0,
         },
@@ -717,8 +733,38 @@ async def _run_translate(
 
         async def on_progress(payload: dict[str, Any], _chapter=chapter, _label=label) -> None:
             ptype = payload.get("type")
+            if ptype == "fallback":
+                primary = f"{payload.get('primary_provider') or '?'} · {payload.get('primary_model') or '?'}"
+                fb = f"{payload.get('fallback_provider') or '?'} · {payload.get('fallback_model') or '?'}"
+                ev = _msg(
+                    "fallback_switched",
+                    lang,
+                    index=payload.get("chunk_index"),
+                    total=payload.get("chunk_total"),
+                    primary=primary,
+                    reason=payload.get("reason") or "error",
+                    fallback=fb,
+                )
+                logger.warning("[Job %s] %s", job_id, ev["message"])
+                _update_job(job_id, message=ev["message"])
+                _publish(
+                    job_id,
+                    {
+                        **payload,
+                        "provider": payload.get("fallback_provider"),
+                        "model": payload.get("fallback_model"),
+                        "chapter_number": _chapter["chapter_number"],
+                        "chapter_title": _chapter["title"],
+                        "completed_items": completed,
+                        "total_items": total,
+                        **ev,
+                    },
+                )
+                return
+
+            engine = f"{payload.get('provider') or '?'} · {payload.get('model') or '?'}"
             if ptype == "title":
-                ev = _msg("translating_title", lang, label=_label)
+                ev = _msg("translating_title", lang, label=_label, engine=engine)
             else:
                 ev = _msg(
                     "chunk_progress",
@@ -727,6 +773,7 @@ async def _run_translate(
                     index=payload.get("chunk_index"),
                     total=payload.get("chunk_total"),
                     chars=payload.get("chunk_chars", 0),
+                    engine=engine,
                 )
             logger.info("[Job %s] %s", job_id, ev["message"])
             _update_job(job_id, message=ev["message"])
@@ -767,6 +814,7 @@ async def _run_translate(
             ) from exc
 
         completed += 1
+        done_engine = f"{result.get('provider_name') or result.get('provider_type') or '?'} · {result.get('model') or '?'}"
         done_ev = _msg(
             "chapter_done_score",
             lang,
@@ -775,6 +823,7 @@ async def _run_translate(
             total=total,
             score=result["quality"]["score"],
             grade=result["quality"]["grade"],
+            engine=done_engine,
         )
         logger.info("[Job %s] %s", job_id, done_ev["message"])
         _update_job(job_id, completed_items=completed, message=done_ev["message"])
@@ -789,6 +838,9 @@ async def _run_translate(
                 "quality_score": result["quality"]["score"],
                 "grade": result["quality"]["grade"],
                 "chunks": result["chunks"],
+                "provider": result.get("provider_name") or result.get("provider_type"),
+                "model": result.get("model"),
+                "fallback_used": result.get("fallback_used", False),
                 "completed_items": completed,
                 "total_items": total,
                 **done_ev,
@@ -878,6 +930,35 @@ async def _run_apply_reference(
             def on_progress(
                 payload: dict[str, Any], _chapter: dict[str, Any] = chapter, _label: str = label
             ) -> None:
+                if payload.get("type") == "fallback":
+                    primary = f"{payload.get('primary_provider') or '?'} · {payload.get('primary_model') or '?'}"
+                    fb = f"{payload.get('fallback_provider') or '?'} · {payload.get('fallback_model') or '?'}"
+                    fb_ev = _msg(
+                        "fallback_switched",
+                        lang,
+                        index=payload.get("chunk_index"),
+                        total=payload.get("chunk_total"),
+                        primary=primary,
+                        reason=payload.get("reason") or "error",
+                        fallback=fb,
+                    )
+                    logger.warning("[Job %s] %s", job_id, fb_ev["message"])
+                    _publish(
+                        job_id,
+                        {
+                            **payload,
+                            "provider": payload.get("fallback_provider"),
+                            "model": payload.get("fallback_model"),
+                            "chapter_number": _chapter["chapter_number"],
+                            "chapter_title": _chapter["title"],
+                            "completed_items": completed,
+                            "total_items": total,
+                            **fb_ev,
+                        },
+                    )
+                    return
+
+                engine = f"{payload.get('provider') or '?'} · {payload.get('model') or '?'}"
                 _publish(
                     job_id,
                     {
@@ -892,6 +973,7 @@ async def _run_apply_reference(
                             label=_label,
                             index=payload.get("chunk_index"),
                             total=payload.get("chunk_total"),
+                            engine=engine,
                         ),
                     },
                 )
@@ -917,6 +999,7 @@ async def _run_apply_reference(
                 ) from exc
 
             completed += 1
+            done_engine = f"{result.get('provider_name') or result.get('provider_type') or '?'} · {result.get('model') or '?'}"
             done_ev = _msg(
                 "chapter_aligned_score",
                 lang,
@@ -925,6 +1008,7 @@ async def _run_apply_reference(
                 total=total,
                 score=result["quality"]["score"],
                 grade=result["quality"]["grade"],
+                engine=done_engine,
             )
             logger.info("[Job %s] %s", job_id, done_ev["message"])
             _update_job(job_id, completed_items=completed, message=done_ev["message"])
@@ -939,6 +1023,9 @@ async def _run_apply_reference(
                     "quality_score": result["quality"]["score"],
                     "grade": result["quality"]["grade"],
                     "chunks": result["chunks"],
+                    "provider": result.get("provider_name") or result.get("provider_type"),
+                    "model": result.get("model"),
+                    "fallback_used": result.get("fallback_used", False),
                     "completed_items": completed,
                     "total_items": total,
                     **done_ev,

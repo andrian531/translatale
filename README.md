@@ -4,7 +4,7 @@
 
 **AI-powered web novel & light novel translator, story-bible manager, and offline reader**
 
-Translatale (*Translate* + *Tale*) helps you scrape, analyze, translate, copyedit, and read Chinese, Japanese, and Korean web novels with consistent character names, locations, and terminology — powered by **Gemini, OpenAI, DeepSeek, OpenRouter, Anthropic, Ollama, or any OpenAI-compatible API**.
+Translatale (*Translate* + *Tale*) helps you scrape, analyze, translate, copyedit, and read Chinese, Japanese, and Korean web novels with consistent character names, locations, and terminology — powered by **Gemini, OpenAI, DeepSeek, OpenRouter, Anthropic, Ollama, local CLI subscriptions (`agy` / `codex`), or any OpenAI-compatible API**.
 
 [![GitHub Stars](https://img.shields.io/github/stars/andrian531/translatale?style=social)](https://github.com/andrian531/translatale/stargazers)
 [![GitHub Issues](https://img.shields.io/github/issues/andrian531/translatale)](https://github.com/andrian531/translatale/issues)
@@ -97,7 +97,7 @@ Translatale (*Translate* + *Tale*) helps you scrape, analyze, translate, copyedi
 
 | Feature | Description |
 | --- | --- |
-| **7+ Provider Backends** | Supports **Gemini, OpenAI, DeepSeek, OpenRouter, Anthropic, Ollama**, and **Custom OpenAI-compatible** endpoints with credential testing and model discovery (**Test & Get Model List**) |
+| **7+ Provider Backends + Local CLIs** | Supports **Gemini, OpenAI, DeepSeek, OpenRouter, Anthropic, Ollama, Custom OpenAI-compatible**, plus local **`agy` (Antigravity CLI)** and **`codex` (OpenAI Codex CLI)** subscriptions with model discovery and live fallback visibility |
 | **Per-Task Routing & Fallback** | Configure separate primary + fallback models for `translate`, `scrape_analysis`, `story_analysis`, and `cover_prompt`, backed by a global **Default Provider & Model** |
 | **Bilingual EN / ID & Dark / Light UI** | Instant language switching (`EN` / `ID`) across UI, error messages, and SSE logs, paired with Dark and Light themes and keyboard-accessible focus indicators |
 

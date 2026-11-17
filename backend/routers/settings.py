@@ -13,12 +13,21 @@ import config
 import database
 from core.app_settings import get_scraper_settings, save_scraper_settings
 from llm.base import LLMError
+from llm.cli_provider import describe_cli
 from llm.registry import create_provider
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 ProviderType = Literal[
-    "gemini", "openai", "openrouter", "deepseek", "anthropic", "custom", "ollama"
+    "gemini",
+    "openai",
+    "openrouter",
+    "deepseek",
+    "anthropic",
+    "custom",
+    "ollama",
+    "agy",
+    "codex",
 ]
 TaskName = Literal["translate", "scrape_analysis", "story_analysis", "cover_prompt"]
 
@@ -233,9 +242,18 @@ def get_meta() -> dict[str, Any]:
                 "default_base_url": config.DEFAULT_BASE_URLS.get(ptype, ""),
                 "default_model": config.DEFAULT_MODELS.get(ptype, ""),
                 "requires_api_key": ptype not in config.KEYLESS_PROVIDERS,
+                **(
+                    {"cli_available": describe_cli(ptype)["available"], "cli_path": describe_cli(ptype)["path"]}
+                    if ptype in ("agy", "codex")
+                    else {}
+                ),
             }
             for ptype in config.PROVIDER_TYPES
         ],
+        "cli_status": {
+            "agy": describe_cli("agy"),
+            "codex": describe_cli("codex"),
+        },
         "tasks": [
             {"value": task, "label": config.TASK_LABELS.get(task, task)}
             for task in config.TASKS

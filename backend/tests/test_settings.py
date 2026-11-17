@@ -702,3 +702,56 @@ def test_tasks_endpoint_includes_cover_prompt_slot(client):
     )
     assert saved.status_code == 200
     assert saved.json()["model_name"] == "gpt-4o"
+
+
+def test_cli_providers_in_meta_and_keyless_upsert(client, monkeypatch):
+    monkeypatch.setattr(
+        "routers.settings.describe_cli",
+        lambda engine: {"available": engine == "agy", "path": f"/bin/{engine}" if engine == "agy" else None},
+    )
+    meta = client.get("/api/settings/meta").json()
+    assert meta["cli_status"]["agy"]["available"] is True
+    assert meta["cli_status"]["codex"]["available"] is False
+
+    by_val = {item["value"]: item for item in meta["provider_types"]}
+    assert by_val["agy"]["requires_api_key"] is False
+    assert by_val["codex"]["requires_api_key"] is False
+    assert by_val["agy"]["cli_available"] is True
+    assert by_val["codex"]["cli_available"] is False
+
+    created = client.post(
+        "/api/settings/providers",
+        json={"provider_type": "agy", "default_model": "default"},
+    )
+    assert created.status_code == 201
+    assert created.json()["has_api_key"] is False
+    assert created.json()["default_model"] == "default"
+
+
+def test_cli_provider_generate_and_test_connection_mocked(monkeypatch):
+    import asyncio
+    from llm.registry import create_provider
+
+    monkeypatch.setattr("llm.cli_provider.resolve_cli_path", lambda engine, override="": f"/usr/bin/{engine}")
+    monkeypatch.setattr("llm.cli_provider._probe_cli_version", lambda exe: "1.0.0")
+    monkeypatch.setattr(
+        "llm.cli_provider._run_agy_sync",
+        lambda exe, prompt, model, timeout: f"AGY:{model}:{len(prompt)}",
+    )
+    monkeypatch.setattr(
+        "llm.cli_provider._run_codex_sync",
+        lambda exe, prompt, model, timeout: f"CODEX:{model}:{len(prompt)}",
+    )
+
+    agy = create_provider("agy")
+    codex = create_provider("codex")
+
+    t1 = asyncio.run(agy.test_connection())
+    t2 = asyncio.run(codex.test_connection())
+    assert t1["ok"] is True and "agy CLI ready" in t1["message"]
+    assert t2["ok"] is True and "codex CLI ready" in t2["message"]
+
+    r1 = asyncio.run(agy.generate("Halo", system_prompt="Edit ID", model="gemini-3.8-flash-high"))
+    r2 = asyncio.run(codex.generate("Hello", system_prompt="Edit EN", model="gpt-5"))
+    assert r1.text.startswith("AGY:gemini-3.8-flash-high:")
+    assert r2.text.startswith("CODEX:gpt-5:")

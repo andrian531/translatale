@@ -130,6 +130,7 @@ class ResolvedTask:
     model: str
     temperature: float
     max_tokens: int
+    provider_name: str = ""
 
 
 class TaskRouter:
@@ -166,6 +167,7 @@ class TaskRouter:
         model_name: str,
         temperature: float,
         max_tokens: int,
+        provider_name: str = "",
     ) -> ResolvedTask:
         # Imported lazily: registry imports the provider modules, which import
         # this module.
@@ -184,6 +186,7 @@ class TaskRouter:
             model=model_name.strip(),
             temperature=float(temperature),
             max_tokens=int(max_tokens),
+            provider_name=(provider_name or "").strip() or provider_type,
         )
 
     def _resolve_default_provider(
@@ -193,7 +196,7 @@ class TaskRouter:
         with database.get_conn(self.db_path) as conn:
             row = conn.execute(
                 """
-                SELECT id, provider_type, api_key, base_url, default_model
+                SELECT id, provider_type, display_name, api_key, base_url, default_model
                 FROM provider_configs
                 WHERE is_default = 1 AND is_enabled = 1 AND trim(default_model) <> ''
                 LIMIT 1
@@ -209,6 +212,7 @@ class TaskRouter:
             model_name=row["default_model"],
             temperature=temperature,
             max_tokens=max_tokens,
+            provider_name=row["display_name"] or row["provider_type"],
         )
 
     def resolve(self) -> ResolvedTask:
@@ -230,6 +234,7 @@ class TaskRouter:
                 model_name=row["model_name"],
                 temperature=float(row["temperature"]),
                 max_tokens=int(row["max_tokens"]),
+                provider_name=row["display_name"] or row["provider_type"],
             )
 
         default_resolved = self._resolve_default_provider(
@@ -258,7 +263,7 @@ class TaskRouter:
                 """
                 SELECT t.fallback_provider_id, t.fallback_model_name,
                        t.temperature, t.max_tokens,
-                       p.provider_type, p.api_key, p.base_url, p.is_enabled
+                       p.provider_type, p.display_name, p.api_key, p.base_url, p.is_enabled
                 FROM task_models AS t
                 LEFT JOIN provider_configs AS p ON p.id = t.fallback_provider_id
                 WHERE t.task_name = ?
@@ -277,6 +282,7 @@ class TaskRouter:
             model_name=row["fallback_model_name"],
             temperature=float(row["temperature"]),
             max_tokens=int(row["max_tokens"]),
+            provider_name=row["display_name"] or row["provider_type"],
         )
 
     async def generate(

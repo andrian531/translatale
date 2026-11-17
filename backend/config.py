@@ -36,6 +36,8 @@ PROVIDER_TYPES: tuple[str, ...] = (
     "anthropic",
     "custom",
     "ollama",
+    "agy",
+    "codex",
 )
 
 PROVIDER_LABELS: dict[str, str] = {
@@ -46,6 +48,8 @@ PROVIDER_LABELS: dict[str, str] = {
     "anthropic": "Anthropic",
     "custom": "Custom (OpenAI-compatible)",
     "ollama": "Ollama",
+    "agy": "Antigravity CLI (agy)",
+    "codex": "OpenAI Codex CLI (codex)",
 }
 
 #: Base URLs pre-filled in the settings form. Users may override them.
@@ -57,6 +61,8 @@ DEFAULT_BASE_URLS: dict[str, str] = {
     "anthropic": "https://api.anthropic.com/v1",
     "custom": "",
     "ollama": "http://localhost:11434/v1",
+    "agy": "",
+    "codex": "",
 }
 
 #: Model used by "Test Connection" when the user has not picked one yet.
@@ -68,10 +74,12 @@ DEFAULT_MODELS: dict[str, str] = {
     "anthropic": "claude-3-5-haiku-latest",
     "custom": "gpt-3.5-turbo",
     "ollama": "llama3.2",
+    "agy": "default",
+    "codex": "default",
 }
 
 #: Providers that do not require an API key.
-KEYLESS_PROVIDERS: frozenset[str] = frozenset({"ollama"})
+KEYLESS_PROVIDERS: frozenset[str] = frozenset({"ollama", "agy", "codex"})
 
 #: Default routing values seeded for every task.
 DEFAULT_TEMPERATURE = 0.7
