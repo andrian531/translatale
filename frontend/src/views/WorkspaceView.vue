@@ -9,7 +9,7 @@ import LineNumberEditor from '@/components/LineNumberEditor.vue'
 import SplitDiffPreview from '@/components/SplitDiffPreview.vue'
 import { useI18n } from '@/i18n'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 
 const route = useRoute()
 const router = useRouter()
@@ -356,6 +356,48 @@ function toggleAll() {
 // ----------------------------------------------------------------------
 // Jobs
 // ----------------------------------------------------------------------
+function formatJobEventMessage(event) {
+  if (!event) return ''
+  if (event.message_key) {
+    const params = { ...(event.message_params || {}) }
+    if (event.message_key === 'new_ref_found' && event.added) {
+      const parts = []
+      if (event.added.characters_added) {
+        parts.push(
+          locale.value === 'id'
+            ? `+${event.added.characters_added} karakter`
+            : `+${event.added.characters_added} characters`,
+        )
+      }
+      if (event.added.locations_added) {
+        parts.push(
+          locale.value === 'id'
+            ? `+${event.added.locations_added} lokasi`
+            : `+${event.added.locations_added} locations`,
+        )
+      }
+      if (event.added.terms_added) {
+        parts.push(
+          locale.value === 'id'
+            ? `+${event.added.terms_added} istilah`
+            : `+${event.added.terms_added} terms`,
+        )
+      }
+      if (parts.length) params.summary = parts.join(', ')
+    }
+    return t(`common.jobMessages.${event.message_key}`, params)
+  }
+  return event.message || ''
+}
+
+const jobMessageMeta = ref(null)
+const displayJobMessage = computed(() => {
+  if (jobMessageMeta.value?.key) {
+    return t(`common.jobMessages.${jobMessageMeta.value.key}`, jobMessageMeta.value.params || {})
+  }
+  return jobMessage.value || job.value?.message || ''
+})
+
 function stopStream() {
   if (closeStream) {
     closeStream()
@@ -366,9 +408,15 @@ function stopStream() {
 function watchJob(jobId) {
   stopStream()
   jobEvents.value = []
+  jobMessageMeta.value = null
   closeStream = translationApi.subscribeJob(jobId, {
     onEvent(event) {
       jobEvents.value = [...jobEvents.value.slice(-40), event]
+      if (event.message_key) {
+        jobMessageMeta.value = { key: event.message_key, params: event.message_params || {} }
+      } else if (event.message) {
+        jobMessageMeta.value = null
+      }
       if (event.message) jobMessage.value = event.message
       if (event.type === 'chunk') {
         jobChunk.value = { index: event.chunk_index, total: event.chunk_total }
@@ -767,7 +815,7 @@ async function runPolishPreview() {
       after: res.polished_content || before,
     }
   } catch (err) {
-    flash('error', err.message || 'Gagal menjalankan Polish AI')
+    flash('error', err.message || t('workspace.errors.polishFailed'))
   } finally {
     polishing.value = false
     polishProgress.value = { index: 0, total: 0 }
@@ -859,7 +907,9 @@ function openReader(chapterId) {
 
 async function downloadExport(format) {
   try {
-    const response = await fetch(readerApi.exportUrl(novelId.value, format))
+    const response = await fetch(readerApi.exportUrl(novelId.value, format), {
+      headers: { 'X-UI-Lang': locale.value },
+    })
     if (!response.ok) {
       let detail = `${response.status} ${response.statusText}`
       try {
@@ -1061,7 +1111,7 @@ async function localizeReferenceSheet() {
     referenceDirty.value = false
     flash('success', t('workspace.notices.referenceLocalized'))
   } catch (err) {
-    flash('error', err.message || 'Gagal merapikan bahasa referensi')
+    flash('error', err.message || t('workspace.errors.localizeReferenceFailed'))
   } finally {
     localizingReference.value = false
   }
@@ -1566,7 +1616,7 @@ onBeforeUnmount(stopStream)
           />
         </div>
 
-        <p class="mt-2 text-xs text-slate-400">{{ jobMessage || job.message }}</p>
+        <p class="mt-2 text-xs text-slate-400">{{ displayJobMessage }}</p>
         <p v-if="job.error" class="mt-1 text-xs text-rose-400">{{ job.error }}</p>
 
         <div
@@ -1582,7 +1632,7 @@ onBeforeUnmount(stopStream)
               · {{ t('common.job.chunk', { index: event.chunk_index, total: event.chunk_total }) }}
             </span>
             <span v-if="event.grade"> · {{ event.quality_score }} ({{ event.grade }})</span>
-            <span v-if="event.message"> — {{ event.message }}</span>
+            <span v-if="formatJobEventMessage(event)"> — {{ formatJobEventMessage(event) }}</span>
           </div>
         </div>
       </div>
@@ -2717,7 +2767,7 @@ onBeforeUnmount(stopStream)
             <span>
               {{ t('workspace.chapterModal.polishing') }}
               <span v-if="polishProgress.total" class="font-mono">
-                (Chunk {{ polishProgress.index }} / {{ polishProgress.total }})
+                ({{ t('common.job.chunk', { index: polishProgress.index, total: polishProgress.total }) }})
               </span>
             </span>
             <span v-if="polishProgress.total" class="font-mono font-semibold">

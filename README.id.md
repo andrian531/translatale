@@ -1,93 +1,171 @@
-# Translatale — Penerjemah Novel & Light Novel AI Berbasis Web
+<div align="center">
 
-**Bahasa:** [English](README.md) | Bahasa Indonesia
+# 📖 Translatale
 
-**Translatale** (*Translate* + *Tale*) adalah aplikasi **penerjemah novel AI** dan **web reader** open-source yang berjalan lokal untuk menerjemahkan web novel / light novel Mandarin, Jepang, dan Korea dengan nama karakter, glosarium, dan alur cerita yang konsisten—didukung oleh **Gemini, OpenAI, DeepSeek, OpenRouter, Anthropic, Ollama, maupun API OpenAI-compatible lainnya**.
+**Penerjemah Web Novel & Light Novel AI berbasis Web dengan Story Bible dan Reader Terintegrasi**
 
-Mulai dari mengambil bab otomatis (*scraping*), menyusun lembar referensi cerita, membuat prompt ilustrasi cover novel, hingga mengekspor buku siap baca ke format `.epub`, `.pdf`, dan `.txt` (lengkap dengan cover), semuanya tersedia dalam satu antarmuka web modern.
+Translatale (*Translate* + *Tale*) membantu Anda mengambil bab (*scraping*), menganalisa cerita, menerjemahkan, menyunting gaya bahasa, dan membaca web novel Mandarin, Jepang, maupun Korea dengan nama karakter, lokasi, serta glosarium yang konsisten — didukung oleh **Gemini, OpenAI, DeepSeek, OpenRouter, Anthropic, Ollama, dan API OpenAI-compatible lainnya**.
 
-> **Latar Belakang:** Translatale merupakan pengembangan dan penulisan ulang dari [andrian531/novel-translator](https://github.com/andrian531/novel-translator), meneruskan alur kerja terjemahan berbasis konteks, pemecahan chunk, dan referensi cerita ke atas arsitektur modern FastAPI + SQLite + Vue 3 dengan scraper modular per situs, routing LLM multi-provider, serta UI dwibahasa (EN/ID) bertema Gelap/Terang.
+[![GitHub Stars](https://img.shields.io/github/stars/andrian531/translatale?style=social)](https://github.com/andrian531/translatale/stargazers)
+[![GitHub Issues](https://img.shields.io/github/issues/andrian531/translatale)](https://github.com/andrian531/translatale/issues)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-## Kenapa Translatale?
+[![Python](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)](https://www.python.org)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+[![Vue 3](https://img.shields.io/badge/Vue-3.5-4FC08D?logo=vue.js&logoColor=white)](https://vuejs.org)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-3-06B6D4?logo=tailwindcss&logoColor=white)](https://tailwindcss.com)
+[![SQLite](https://img.shields.io/badge/SQLite-Local-003B57?logo=sqlite&logoColor=white)](https://sqlite.org)
 
-- **Nama & Istilah Konsisten:** Analisa cerita AI otomatis membangun **Lembar Referensi** hidup (karakter, julukan, relasi, lokasi, istilah/glosarium, dan panduan gaya bahasa) yang disuntikkan ke setiap prompt terjemahan.
-- **Bebas Pilih Banyak LLM:** Gunakan provider/model berbeda untuk tiap proses—lengkap dengan **Default Provider & Model** otomatis serta **Model Cadangan (*Fallback*)** opsional (mis. model *uncensored*) saat model utama menolak atau gagal.
-- **Nyaman untuk Novel Panjang (Ratusan Bab):** Job latar belakang dengan log SSE detail, tombol sekali klik **Translate Berikutnya (5)**, **Apply Reference paralel 5 bab sekaligus**, tabel bab dengan pencarian & pagination, serta ekspor `.epub` / `.pdf` / `.txt` / `.json`.
+[Mulai Cepat](#-mulai-cepat) · [Tangkapan Layar](#-tangkapan-layar) · [Fitur](#-fitur) · [Arsitektur](#-arsitektur) · [English](README.md)
 
-## Arsitektur
+</div>
 
-- **Backend:** Python (FastAPI, SQLite, Playwright, BeautifulSoup4)
-- **Frontend:** Vue 3 + Vite + Tailwind CSS (UI Bahasa Inggris / Indonesia + Tema Gelap / Terang)
-- **Routing LLM:** Dukungan multi-provider (**Gemini, OpenAI, OpenRouter, DeepSeek, Anthropic, Custom OpenAI-compatible, Ollama**) dengan tombol **Test & Ambil Daftar Model** sebelum simpan, fallback **Default Provider / Model**, serta routing utama + cadangan terpisah untuk 4 slot proses:
-  - `translate` — Terjemahan isi & judul bab
-  - `scrape_analysis` — Analisa struktur situs / HTML
-  - `story_analysis` — Analisa cerita & ekstraksi referensi
-  - `cover_prompt` — Generator prompt gambar cover novel
-- **Mode Input:** Scraper modular per situs (`scrapers/sites/<site>.py`) dan input bab manual (paste atau upload `.txt`).
+> **Latar Belakang:** Translatale merupakan pengembangan dan penulisan ulang dari [andrian531/novel-translator](https://github.com/andrian531/novel-translator), membawa alur kerja terjemahan berbasis konteks, pemecahan chunk, dan referensi cerita ke atas arsitektur **FastAPI + SQLite + Vue 3** dengan scraper modular per situs, skill AI berbasis Markdown, serta UI dwibahasa (`EN` / `ID`) bertema Gelap & Terang.
 
-## Fitur Utama
+---
 
-- **Scraper Modular & Batch Fetch:** Scraper per situs (`scrapers/sites/`) dengan pratinjau URL, sinkronisasi daftar bab (*Cek Bab Baru*), tautan URL sumber novel/bab yang dapat diklik, serta pengambilan massal di latar belakang dengan jeda rate-limit dan *circuit breaker*.
-- **Routing LLM Multi-Provider & Model Cadangan:**
-  - Atur **Default Provider & Model** agar slot proses yang belum diisi tetap langsung bisa dipakai.
-  - **Model Cadangan** opsional otomatis mengambil alih saat model utama gagal, kosong, menolak konten, atau menghasilkan JSON analisa yang tidak valid.
-- **Analisa Cerita & Lembar Referensi:**
-  - Mengekstrak **Karakter** (nama asli, romanisasi, gender, usia, julukan/alias, relasi, catatan), **Terms / Glossary**, **Lokasi**, dan **Translation Guide** (target istilah & lokasi mengikuti `target_lang` novel).
-  - Mendukung kolom **Cara Baca (Latin)** dan toggle **Latin** per baris (`Latin (Terjemahan)`, contoh: `Dantian (Pusat Energi)`) pada Terms dan Locations.
-  - **Apply Reference Paralel 5×:** Menyelaraskan bab yang sudah diterjemahkan agar mengikuti pembaruan karakter, glosarium, dan lokasi secara paralel hingga 5 bab sekaligus.
-- **Terjemahan Chunk Sadar-Konteks:**
-  - Memecah bab panjang di batas paragraf/kalimat, menyuntikkan lembar referensi + ringkasan bab bergulir (`STORY SO FAR`) + akhir chunk sebelumnya, melakukan retry otomatis, dan menghentikan batch bila ada bab gagal agar konteks tidak terputus.
-  - **Translate Berikutnya (5):** Menerjemahkan 5 bab berikutnya setelah bab terakhir yang sudah diterjemahkan hanya dengan satu klik.
-  - Peringatan saat menerjemahkan melompati bab, dukungan **Auto-update referensi** per bab, dan **Hapus Terjemahan / Reset TL** tanpa menghapus teks sumber (`raw_content`).
-  - **Auto-resume stream SSE** saat kembali ke Workspace, log langkah yang detail, dan pembersihan job terputus saat server startup.
-- **Thumbnail Cover Novel & Generator Prompt Cover AI:**
-  - Upload **thumbnail cover 2:3** (PNG/JPG/WebP) yang tampil di kartu Library dan header Workspace.
-  - Buat **Prompt Gambar Cover 2:3** yang detail dari sinopsis & referensi cerita dalam 2 format siap pakai: **Positive + Negative Prompt** dan **JSON Prompt** terstruktur.
-- **Tabel Bab Workspace & Web Reader:**
-  - **Pagination** (`25/50/100/200`), **pencarian cepat** nomor/judul bab, **sorting kolom**, tombol aksi responsif (ikon/teks), serta edit `URL Sumber` per bab dengan checkbox pengaman.
-  - **Web Reader** terintegrasi dengan tema baca independen (Gelap / Sepia / Terang), pengaturan font, pelacakan progres baca, serta ekspor ke **`.epub`**, **`.pdf`** (dengan halaman cover & bab dimulai di halaman baru), **`.txt`**, dan backup **`.json`**.
+## 📸 Tangkapan Layar
 
-## Menjalankan Aplikasi
+### Workspace & Daftar Bab
+*Info novel, thumbnail cover 2:3, ekspor multi-format, sinopsis terjemahan, toolbar aksi 2 baris, penanda kebersihan bab, dan skor kualitas.*
 
-**Cara Cepat (Windows):**
+![Workspace Chapters](docs/screenshots/workspace-chapters.png)
+
+<details>
+<summary>🖼️ Lihat tangkapan layar lainnya (Library, Reference Sheet, Editor &amp; Polish, Web Reader, Settings)</summary>
+
+#### Library
+![Library](docs/screenshots/library.png)
+
+#### Analisa Cerita & Lembar Referensi
+![Story & Reference](docs/screenshots/workspace-reference.png)
+
+#### Modal View/Edit (Nomor Baris CodeMirror 6 + AI Polish)
+![View/Edit Modal](docs/screenshots/editor-modal.png)
+
+#### Web Reader Terintegrasi
+![Web Reader](docs/screenshots/reader.png)
+
+#### Pengaturan Multi-Provider LLM & Routing
+![Settings](docs/screenshots/settings.png)
+
+</details>
+
+---
+
+## ✨ Fitur
+
+### 🧠 Analisa Cerita & Lembar Referensi Hidup
+
+| Fitur | Deskripsi |
+| --- | --- |
+| **Ekstraksi Cerita & Entitas AI** | Mengekstrak **Karakter** (nama asli, romanisasi, usia, gender, alias, relasi, catatan), **Lokasi**, **Istilah / Glosarium**, serta **Translation Guide** langsung dalam bahasa target novel |
+| **Toggle Format Latin per Baris** | Aktifkan **Latin** pada istilah atau lokasi tertentu agar ditulis dalam format `Romanisasi (Terjemahan)` (misal: `kōngjiān (ruang)`) di seluruh terjemahan |
+| **Rapikan Bahasa Referensi (AI)** | Mengonversi entri lama Reference Sheet yang masih berbahasa Inggris ke bahasa target (`Indonesian`) dalam 1 klik tanpa menghapus entri yang ada |
+| **Apply Reference Paralel 5×** | Menyelaraskan bab yang sudah diterjemahkan hingga 5 bab sekaligus sambil membandingkan `[SOURCE TEXT]` asli dengan `[EXISTING TRANSLATION]` agar istilah bertumpuk tidak tertukar |
+| **Ringkasan Konteks Bergulir** | Meringkas bab ke `STORY SO FAR` (maksimal 5 bab terakhir) untuk menjaga kesinambungan alur tanpa membengkakkan ukuran prompt |
+
+### ✍️ Terjemahan Sadar-Konteks & Skill Editor
+
+| Fitur | Deskripsi |
+| --- | --- |
+| **Chunking & Retry Otomatis** | Memecah bab panjang di batas paragraf/kalimat, menyuntikkan Reference Sheet + `STORY SO FAR` + ekor chunk sebelumnya, retry otomatis, dan berhenti bila ada bab gagal |
+| **Skill AI Markdown (`backend/skills/`)** | Instruksi prompt dalam file Markdown terpisah untuk terjemahan, penyuntingan EYD V & anti-*translationese* (`editor_id.md`, `editor_en.md`), polish, sinopsis, dan analisa cerita |
+| **Translate Next (5) & Penjaga Urutan** | Menerjemahkan 5 bab berikutnya dalam 1 klik, serta peringatan sebelum menerjemahkan bab yang melompati bab belum diterjemahkan |
+| **Logger & Loader Dwibahasa Real-Time** | Progress bar dan log SSE otomatis mengikuti bahasa UI aktif (`EN` / `ID`), termasuk saat bahasa diganti di tengah proses |
+| **Cek Kebersihan Bab & Hapus Baris Kotor** | Menandai bab yang masih memuat promosi situs, navigasi (`目录`, `Halaman sebelumnya`), sisa HTML, teks pendek, atau sisa CJK dengan ikon `!` yang bisa dihapus langsung di modal editor |
+| **Editor CodeMirror 6 & Preview Diff Ala GitHub** | Editor `Raw` & `Translated` bernomor baris dengan sorotan baris kotor dan tombol **`✨ Polish (AI)`** yang menampilkan perbandingan 2 kolom (*Before vs After*) sebelum disimpan |
+
+### 🌐 Scraper Modular & Input Bab
+
+| Fitur | Deskripsi |
+| --- | --- |
+| **Scraper Modular per Situs** | Adapter situs di `backend/scrapers/sites/` lengkap dengan pratinjau URL, sinkronisasi daftar bab (*Cek Bab Baru*), tautan sumber, dan **Scraper AI Analyzer** |
+| **Batch Fetch & Circuit Breaker** | Pengambilan isi bab di latar belakang dengan jeda rate-limit, ukuran batch fleksibel, dan penghentian otomatis jika terjadi error beruntun |
+| **Input Manual & Upload `.txt`** | Tambah bab manual, masukkan daftar URL, atau unggah banyak file `.txt` sekaligus ke workspace novel |
+
+### 📚 Web Reader, Cover & Ekspor E-Book
+
+| Fitur | Deskripsi |
+| --- | --- |
+| **Web Reader Terintegrasi** | Tampilan baca nyaman dengan tema **Gelap / Sepia / Terang**, pengaturan ukuran font & lebar baca, sidebar daftar bab, dan pelacakan bab terakhir dibaca |
+| **Ekspor Multi-Format** | Ekspor bab terjemahan ke **`.epub`** (e-book lengkap dengan cover & daftar isi), **`.pdf`** (halaman cover penuh & tiap bab mulai di halaman baru), **`.txt`**, dan backup **`.json`** |
+| **Thumbnail Cover & Generator Prompt AI** | Upload cover 2:3 untuk Library, Workspace, EPUB, dan PDF, atau buat prompt ilustrasi cover AI dalam format **Text + Negative** dan **JSON** terstruktur |
+
+### ⚙️ Routing LLM Multi-Provider & UI Dwibahasa
+
+| Fitur | Deskripsi |
+| --- | --- |
+| **7+ Dukungan Provider** | Mendukung **Gemini, OpenAI, DeepSeek, OpenRouter, Anthropic, Ollama**, dan **Custom OpenAI-compatible** lengkap dengan **Test & Ambil Daftar Model** |
+| **Routing per Proses & Model Cadangan** | Atur model utama + cadangan secara terpisah untuk `translate`, `scrape_analysis`, `story_analysis`, dan `cover_prompt`, plus **Default Provider & Model** |
+| **UI EN / ID & Tema Gelap / Terang** | Penggantian bahasa dan tema secara instan dengan dukungan aksesibilitas keyboard (`focus-visible`) dan tabel responsif |
+
+---
+
+<details>
+<summary>🗺️ Peta Arsitektur &amp; Komponen</summary>
+
+| Lapisan | Modul Utama | Fungsi |
+| --- | --- | --- |
+| **API & Job** | `backend/main.py`, `backend/routers/*.py`, `backend/core/job_runner.py` | Endpoint FastAPI, middleware `X-UI-Lang`, background job, dan stream log SSE |
+| **AI & Skill** | `backend/core/skills.py`, `backend/skills/*.md`, `backend/core/translator.py`, `backend/core/analyzer.py` | Loader skill Markdown, penerjemah chunk, penyunting/polish, dan analisa cerita JSON |
+| **Kualitas & Ekspor** | `backend/core/quality.py`, `backend/core/exporter.py`, `backend/core/synopsis.py` | Deteksi kebersihan bab, skor kualitas, dan pembuat EPUB/PDF/TXT/JSON |
+| **Scraper & DB** | `backend/scrapers/`, `backend/database.py` | Registry scraper per situs dan database SQLite lokal (`backend/data/translatale.db`) |
+| **Frontend Vue 3** | `frontend/src/views/{Library,Workspace,Reader,Scrapers,Settings}View.vue` | Antarmuka Vue 3 + Vite + Tailwind CSS + CodeMirror 6 (`LineNumberEditor`) + Split Diff |
+
+</details>
+
+---
+
+## 🚀 Mulai Cepat
+
+### Cara Cepat (Windows)
 
 Klik dua kali `start.bat` (atau jalankan `.\start.bat` di terminal). Script ini otomatis:
-- Membuat `backend\.venv` dan menginstall `requirements.txt` (saat pertama kali atau jika ada pembaruan)
-- Menginstall `frontend\node_modules` via `npm` (saat pertama kali atau jika `package.json` berubah)
-- Menjalankan backend (`8000`) dan frontend (`5173`) dalam **1 window** dengan prefix log `[BE]` dan `[FE]`, lalu membuka `http://localhost:5173` di browser
+1. Membuat `backend\.venv` dan menginstall `backend\requirements.txt`.
+2. Menginstall `frontend\node_modules` melalui `npm`.
+3. Menjalankan backend (`:8000`) dan frontend (`:5173`) dalam satu jendela dengan prefix `[BE]` / `[FE]` lalu membuka `http://localhost:5173`.
 
-Untuk menghentikan kedua server, cukup tekan `Ctrl+C` atau tutup window `start.bat` (atau jalankan `stop.bat` jika perlu membersihkan proses yang tersisa).
+Tekan `Ctrl+C` atau jalankan `stop.bat` untuk menghentikan server.
 
-**Setup Manual:**
+### Setup Manual
 
 **Backend** (Python 3.10+):
 
 ```bash
 cd backend
 python -m venv .venv
-.venv\Scripts\activate          # Windows
+.venv\Scripts\activate          # Linux/macOS: source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn main:app --reload --port 8000
 ```
 
-Dokumentasi API: http://127.0.0.1:8000/docs · health: http://127.0.0.1:8000/api/health
+Dokumentasi API: `http://127.0.0.1:8000/docs` · Health check: `http://127.0.0.1:8000/api/health`
 
-**Frontend** (Node 18+):
+**Frontend** (Node.js 18+):
 
 ```bash
 cd frontend
 npm install
-npm run dev                     # http://localhost:5173
+npm run dev                     # http://localhost:5173 (proxy /api -> :8000)
 ```
 
-Dev server Vite meneruskan `/api` ke `http://127.0.0.1:8000`, jadi jalankan keduanya.
-
-**Pengujian (Tests):**
+### Pengujian & Build
 
 ```bash
+# Test backend
 cd backend
-.venv\Scripts\python -m pytest
+.venv\Scripts\python -m pytest -v
+
+# Build produksi frontend
+cd frontend
+npm run build
 ```
 
-Database SQLite dibuat otomatis di `backend/data/translatale.db`
-(dapat diubah lewat `TRANSLATALE_DB_PATH` / `TRANSLATALE_DATA_DIR`).
+Database SQLite dibuat otomatis di `backend/data/translatale.db` (dapat diubah lewat `TRANSLATALE_DB_PATH` atau `TRANSLATALE_DATA_DIR`).
+
+---
+
+## 📄 Lisensi
+
+Dirilis di bawah **Lisensi MIT**. Lihat berkas [`LICENSE`](LICENSE) untuk detail lengkapnya.

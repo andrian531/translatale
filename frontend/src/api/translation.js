@@ -1,3 +1,4 @@
+import { locale } from '@/i18n'
 import { request } from './client'
 
 export const translationApi = {
@@ -43,7 +44,10 @@ export const translationApi = {
   async polishChapterStream(chapterId, translatedContent, onProgress) {
     const response = await fetch(`/api/chapters/${chapterId}/polish/stream`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-UI-Lang': locale.value,
+      },
       body: JSON.stringify({ translated_content: translatedContent }),
     })
     if (!response.ok) {
@@ -98,7 +102,9 @@ export const translationApi = {
    * `onEvent` fires for every event; `onDone` fires once on a terminal event.
    */
   subscribeJob(jobId, { onEvent, onDone, onError } = {}) {
-    const source = new EventSource(`/api/jobs/${jobId}/events`)
+    const source = new EventSource(
+      `/api/jobs/${jobId}/events?lang=${encodeURIComponent(locale.value)}`,
+    )
 
     source.onmessage = (message) => {
       let data

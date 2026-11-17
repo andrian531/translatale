@@ -10,12 +10,13 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 import config
 import database
 from core import job_runner
+from core.i18n import reset_ui_lang, set_ui_lang
 from routers import projects, reader, scrapers, settings, translation
 
 __version__ = "0.1.0"
@@ -44,6 +45,16 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def ui_language_middleware(request: Request, call_next):
+    lang = request.headers.get("x-ui-lang") or request.query_params.get("lang")
+    token = set_ui_lang(lang)
+    try:
+        return await call_next(request)
+    finally:
+        reset_ui_lang(token)
 
 app.include_router(settings.router)
 app.include_router(projects.router)

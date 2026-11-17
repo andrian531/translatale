@@ -64,7 +64,7 @@ export default {
     uploading: 'Mengunggah…',
     viewEdit: 'Lihat/Edit',
     resetTranslation: 'Reset TL',
-    runAnalysis: 'Run AI Analysis',
+    runAnalysis: 'Jalankan Analisa AI',
     saveChanges: 'Simpan Perubahan',
     localizeReference: 'Rapikan Bahasa Referensi (AI)',
     localizingReference: 'Menerjemahkan referensi…',
@@ -269,6 +269,8 @@ export default {
     saveReference: 'Gagal menyimpan reference: {message}',
     noTranslatedChapters: 'Belum ada bab yang sudah diterjemahkan.',
     applyReference: 'Gagal menerapkan referensi: {message}',
+    polishFailed: 'Gagal menjalankan Polish AI',
+    localizeReferenceFailed: 'Gagal merapikan bahasa referensi',
     earlierPending:
       'Bab sebelumnya masih berstatus pending fetch. Jalankan Fetch Raw terlebih dahulu.',
   },

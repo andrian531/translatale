@@ -1,3 +1,5 @@
+import { locale } from '@/i18n'
+
 const BASE = '/api'
 
 async function parseError(response) {
@@ -16,9 +18,14 @@ async function parseError(response) {
 }
 
 export async function request(path, options = {}) {
+  const { headers: customHeaders, ...rest } = options
   const response = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options,
+    ...rest,
+    headers: {
+      'Content-Type': 'application/json',
+      'X-UI-Lang': locale.value,
+      ...(customHeaders || {}),
+    },
   })
 
   if (!response.ok) throw new Error(await parseError(response))
@@ -28,7 +35,11 @@ export async function request(path, options = {}) {
 
 /** Multipart upload: the browser must set the boundary, so no Content-Type. */
 export async function requestForm(path, formData) {
-  const response = await fetch(`${BASE}${path}`, { method: 'POST', body: formData })
+  const response = await fetch(`${BASE}${path}`, {
+    method: 'POST',
+    headers: { 'X-UI-Lang': locale.value },
+    body: formData,
+  })
   if (!response.ok) throw new Error(await parseError(response))
   return response.json()
 }

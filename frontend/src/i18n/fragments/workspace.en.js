@@ -269,6 +269,8 @@ export default {
     saveReference: 'Failed to save reference: {message}',
     noTranslatedChapters: 'No translated chapters yet.',
     applyReference: 'Failed to apply reference: {message}',
+    polishFailed: 'Failed to run Polish AI',
+    localizeReferenceFailed: 'Failed to localize reference sheet',
     earlierPending: 'The earlier chapters are still pending_fetch. Run Fetch Raw first.',
   },
   notices: {

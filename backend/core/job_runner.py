@@ -20,6 +20,7 @@ from core.analyzer import (
     update_reference_from_chapter,
 )
 from core.app_settings import get_scraper_settings
+from core.i18n import get_ui_lang, normalize_lang, tr
 from core.translator import TranslationError, apply_reference_to_chapter, translate_chapter
 from scrapers.base import ScraperError
 from scrapers.registry import find_scraper, get_scraper
@@ -43,10 +44,19 @@ class FetchAborted(JobError):
 @dataclass
 class JobState:
     job_id: str
+    lang: str = "en"
     task: asyncio.Task | None = None
     cancelled: bool = False
     finished: bool = False
     subscribers: list[asyncio.Queue] = field(default_factory=list)
+
+
+def _msg(key: str, lang: str | None = None, **params: Any) -> dict[str, Any]:
+    return {
+        "message": tr(key, lang, **params),
+        "message_key": key,
+        "message_params": params,
+    }
 
 
 _JOBS: dict[str, JobState] = {}
@@ -148,7 +158,7 @@ async def subscribe(job_id: str) -> AsyncIterator[dict[str, Any]]:
             "type": "done",
             "job_id": job_id,
             "status": job["status"],
-            "message": "Job tidak aktif di proses ini",
+            **_msg("not_active"),
         }
         return
 
@@ -178,6 +188,7 @@ async def start_job(
     chapter_ids: list[int] | None = None,
     db_path: str | None = None,
     auto_update_reference: bool = True,
+    lang: str | None = None,
 ) -> dict[str, Any]:
     """Create the job row and schedule it on the running event loop."""
     if job_type not in JOB_TYPES:
@@ -186,6 +197,7 @@ async def start_job(
     job_id = str(uuid.uuid4())
     now = database.utcnow()
     total = len(chapter_ids) if chapter_ids else 1
+    active_lang = normalize_lang(lang or get_ui_lang())
 
     with database.get_conn(db_path) as conn:
         conn.execute(
@@ -193,12 +205,12 @@ async def start_job(
             INSERT INTO translation_jobs
                 (id, novel_id, job_type, status, total_items, completed_items,
                  current_chapter_id, message, error, created_at, updated_at)
-            VALUES (?, ?, ?, 'queued', ?, 0, NULL, 'Menunggu…', '', ?, ?)
+            VALUES (?, ?, ?, 'queued', ?, 0, NULL, ?, '', ?, ?)
             """,
-            (job_id, novel_id, job_type, total, now, now),
+            (job_id, novel_id, job_type, total, tr("queued", active_lang), now, now),
         )
 
-    state = JobState(job_id=job_id)
+    state = JobState(job_id=job_id, lang=active_lang)
     _JOBS[job_id] = state
     state.task = asyncio.create_task(
         _run(state, job_type, novel_id, chapter_ids, db_path, auto_update_reference)
@@ -223,7 +235,7 @@ async def cancel_job(job_id: str) -> dict[str, Any]:
             except (asyncio.CancelledError, Exception):
                 pass
     else:
-        _update_job(job_id, status="cancelled", message="Dibatalkan")
+        _update_job(job_id, status="cancelled", message=tr("cancelled"))
 
     return get_job(job_id) or job
 
@@ -250,9 +262,11 @@ async def _run(
     auto_update_reference: bool = True,
 ) -> None:
     job_id = state.job_id
+    lang = state.lang
     try:
-        _update_job(job_id, status="running", message="Memulai…")
-        _publish(job_id, {"type": "status", "status": "running", "message": "Memulai…"})
+        start_ev = _msg("starting", lang)
+        _update_job(job_id, status="running", message=start_ev["message"])
+        _publish(job_id, {"type": "status", "status": "running", **start_ev})
 
         if job_type == "story_analysis":
             await _run_analysis(state, novel_id, chapter_ids, db_path)
@@ -269,10 +283,11 @@ async def _run(
             raise asyncio.CancelledError
 
         job = get_job(job_id) or {}
+        done_ev = _msg("completed", lang)
         _update_job(
             job_id,
             status="completed",
-            message="Selesai",
+            message=done_ev["message"],
             completed_items=job.get("total_items", 0),
             current_chapter_id=None,
         )
@@ -281,7 +296,7 @@ async def _run(
             {
                 "type": "done",
                 "status": "completed",
-                "message": "Selesai",
+                **done_ev,
                 "completed_items": job.get("total_items", 0),
                 "total_items": job.get("total_items", 0),
             },
@@ -289,13 +304,14 @@ async def _run(
     except asyncio.CancelledError:
         # A cancelled job must not leave chapters stuck in 'translating'.
         _reset_translating(chapter_ids, db_path)
-        _update_job(job_id, status="cancelled", message="Dibatalkan", current_chapter_id=None)
-        _publish(job_id, {"type": "cancelled", "status": "cancelled", "message": "Dibatalkan"})
+        cancel_ev = _msg("cancelled", lang)
+        _update_job(job_id, status="cancelled", message=cancel_ev["message"], current_chapter_id=None)
+        _publish(job_id, {"type": "cancelled", "status": "cancelled", **cancel_ev})
     except (AnalysisError, TranslationError, JobError) as exc:
-        _update_job(job_id, status="failed", error=str(exc), message="Gagal")
+        _update_job(job_id, status="failed", error=str(exc), message=tr("failed", lang))
         _publish(job_id, {"type": "error", "status": "failed", "message": str(exc)})
     except Exception as exc:  # noqa: BLE001 - a job must never crash the server
-        _update_job(job_id, status="failed", error=f"{type(exc).__name__}: {exc}", message="Gagal")
+        _update_job(job_id, status="failed", error=f"{type(exc).__name__}: {exc}", message=tr("failed", lang))
         _publish(
             job_id,
             {"type": "error", "status": "failed", "message": f"{type(exc).__name__}: {exc}"},
@@ -311,8 +327,10 @@ async def _run_analysis(
     db_path: str | None,
 ) -> None:
     job_id = state.job_id
-    _update_job(job_id, message="Menganalisis cerita…")
-    _publish(job_id, {"type": "progress", "message": "Menganalisis cerita…"})
+    lang = state.lang
+    analyzing_ev = _msg("analyzing_story", lang)
+    _update_job(job_id, message=analyzing_ev["message"])
+    _publish(job_id, {"type": "progress", **analyzing_ev})
 
     result = await analyze_novel(novel_id, chapter_ids, db_path)
     analyzed = result["chapters_analyzed"]
@@ -322,7 +340,7 @@ async def _run_analysis(
         job_id,
         {
             "type": "progress",
-            "message": f"Referensi diperbarui: {result['counts']}",
+            **_msg("reference_updated", lang, counts=result["counts"]),
             "total_items": len(analyzed) or 1,
             "completed_items": 0,
         },
@@ -340,7 +358,7 @@ async def _run_analysis(
                 "chapter_id": chapter["id"],
                 "chapter_number": chapter["chapter_number"],
                 "chapter_title": chapter["title"],
-                "message": f"Merangkum bab {_fmt_number(chapter['chapter_number'])}…",
+                **_msg("summarizing_chapter", lang, number=_fmt_number(chapter["chapter_number"])),
             },
         )
         try:
@@ -352,7 +370,12 @@ async def _run_analysis(
                 {
                     "type": "warning",
                     "chapter_id": chapter["id"],
-                    "message": f"Ringkasan bab {_fmt_number(chapter['chapter_number'])} dilewati: {exc}",
+                    **_msg(
+                        "summary_skipped",
+                        lang,
+                        number=_fmt_number(chapter["chapter_number"]),
+                        error=exc,
+                    ),
                 },
             )
         completed += 1
@@ -363,7 +386,7 @@ async def _run_analysis(
                 "type": "progress",
                 "completed_items": completed,
                 "total_items": len(analyzed) or 1,
-                "message": f"{completed}/{len(analyzed)} bab dianalisis",
+                **_msg("chapters_analyzed", lang, completed=completed, total=len(analyzed)),
             },
         )
 
@@ -376,22 +399,28 @@ async def _run_fetch(
 ) -> None:
     """Fetch chapter bodies one by one, with a delay and a circuit breaker."""
     job_id = state.job_id
+    lang = state.lang
     if not chapter_ids:
-        raise JobError("Tidak ada bab yang dipilih untuk di-fetch")
+        raise JobError(
+            "No chapters selected to fetch"
+            if lang == "en"
+            else "Tidak ada bab yang dipilih untuk di-fetch"
+        )
 
     settings = get_scraper_settings(db_path)
     delay = float(settings["fetch_delay_seconds"])
     max_errors = int(settings["fetch_max_consecutive_errors"])
     total = len(chapter_ids)
 
-    _update_job(job_id, total_items=total, message=f"0/{total} bab")
+    init_ev = _msg("zero_of_total", lang, total=total)
+    _update_job(job_id, total_items=total, message=init_ev["message"])
     _publish(
         job_id,
         {
             "type": "progress",
             "total_items": total,
             "completed_items": 0,
-            "message": f"0/{total} bab",
+            **init_ev,
         },
     )
 
@@ -420,7 +449,7 @@ async def _run_fetch(
 
         chapter = dict(chapter_row)
         label = _fmt_number(chapter["chapter_number"])
-        title = chapter["title"] or f"Bab {label}"
+        title = chapter["title"] or (f"Chapter {label}" if lang == "en" else f"Bab {label}")
 
         _update_job(job_id, current_chapter_id=chapter_id)
         _publish(
@@ -430,7 +459,7 @@ async def _run_fetch(
                 "chapter_id": chapter_id,
                 "chapter_number": chapter["chapter_number"],
                 "chapter_title": title,
-                "message": f"Fetch bab {index}/{total}: {title}",
+                **_msg("fetching_chapter", lang, index=index, total=total, title=title),
             },
         )
 
@@ -461,14 +490,22 @@ async def _run_fetch(
                     "chapter_number": chapter["chapter_number"],
                     "completed_items": completed,
                     "total_items": total,
-                    "message": f"Bab {label} gagal: {exc}",
+                    **_msg("chapter_failed", lang, label=label, error=exc),
                 },
             )
             if consecutive_errors >= max_errors:
                 raise FetchAborted(
-                    f"Dihentikan setelah {consecutive_errors} error beruntun — kemungkinan "
-                    f"diblokir (403/429) atau struktur halaman berubah. "
-                    f"{fetched} bab yang sudah berhasil tetap tersimpan."
+                    (
+                        f"Stopped after {consecutive_errors} consecutive errors — possibly "
+                        f"blocked (403/429) or page structure changed. "
+                        f"{fetched} fetched chapters remain saved."
+                    )
+                    if lang == "en"
+                    else (
+                        f"Dihentikan setelah {consecutive_errors} error beruntun — kemungkinan "
+                        f"diblokir (403/429) atau struktur halaman berubah. "
+                        f"{fetched} bab yang sudah berhasil tetap tersimpan."
+                    )
                 ) from exc
         else:
             consecutive_errors = 0
@@ -495,9 +532,7 @@ async def _run_fetch(
                     "chapter_title": title,
                     "completed_items": completed,
                     "total_items": total,
-                    "message": (
-                        f"Bab {label} tersimpan ({len(content.content)} karakter)"
-                    ),
+                    **_msg("chapter_saved", lang, label=label, chars=len(content.content)),
                 },
             )
 
@@ -512,23 +547,38 @@ async def _run_fetch(
 
     if failures and fetched == 0:
         raise FetchAborted(
-            f"Semua {len(failures)} bab gagal diambil. {failures[0]}"
+            f"All {len(failures)} chapters failed to fetch. {failures[0]}"
+            if lang == "en"
+            else f"Semua {len(failures)} bab gagal diambil. {failures[0]}"
         )
     if failures:
         _publish(
             job_id,
-            {"type": "warning", "message": f"{len(failures)} bab gagal: {failures[0]}"},
+            {"type": "warning", **_msg("failures_warning", lang, count=len(failures), first=failures[0])},
         )
 
 
-def _describe_added(added: dict[str, int]) -> str:
+def _describe_added(added: dict[str, int], lang: str | None = None) -> str:
+    active_lang = normalize_lang(lang or get_ui_lang())
     parts = []
     if added.get("characters_added"):
-        parts.append(f"+{added['characters_added']} karakter")
+        parts.append(
+            f"+{added['characters_added']} characters"
+            if active_lang == "en"
+            else f"+{added['characters_added']} karakter"
+        )
     if added.get("locations_added"):
-        parts.append(f"+{added['locations_added']} lokasi")
+        parts.append(
+            f"+{added['locations_added']} locations"
+            if active_lang == "en"
+            else f"+{added['locations_added']} lokasi"
+        )
     if added.get("terms_added"):
-        parts.append(f"+{added['terms_added']} istilah")
+        parts.append(
+            f"+{added['terms_added']} terms"
+            if active_lang == "en"
+            else f"+{added['terms_added']} istilah"
+        )
     return ", ".join(parts)
 
 
@@ -579,14 +629,20 @@ async def _run_translate(
     auto_update_reference: bool = True,
 ) -> None:
     job_id = state.job_id
+    lang = state.lang
     if not chapter_ids:
-        raise JobError("Tidak ada bab yang dipilih untuk diterjemahkan")
+        raise JobError(
+            "No chapters selected to translate"
+            if lang == "en"
+            else "Tidak ada bab yang dipilih untuk diterjemahkan"
+        )
 
     total = len(chapter_ids)
-    _update_job(job_id, total_items=total, message=f"0/{total} bab")
+    init_ev = _msg("zero_of_total", lang, total=total)
+    _update_job(job_id, total_items=total, message=init_ev["message"])
     _publish(
         job_id,
-        {"type": "progress", "total_items": total, "completed_items": 0, "message": f"0/{total} bab"},
+        {"type": "progress", "total_items": total, "completed_items": 0, **init_ev},
     )
 
     completed = 0
@@ -601,7 +657,7 @@ async def _run_translate(
                 "SELECT id, chapter_number, title FROM chapters WHERE id = ?", (chapter_id,)
             ).fetchone()
         if row is None:
-            failures.append(f"Bab {chapter_id} tidak ditemukan")
+            failures.append(f"Chapter {chapter_id} not found" if lang == "en" else f"Bab {chapter_id} tidak ditemukan")
             continue
 
         chapter = dict(row)
@@ -610,9 +666,9 @@ async def _run_translate(
         # Pick up characters/terms that first appear in this chapter *before*
         # translating it, so they are already in this chapter's prompt.
         if auto_update_reference:
-            ref_msg = f"Bab {label}: menganalisa referensi baru ({completed}/{total})…"
-            logger.info("[Job %s] %s", job_id, ref_msg)
-            _update_job(job_id, current_chapter_id=chapter_id, message=ref_msg)
+            ref_ev = _msg("analyzing_ref", lang, label=label, completed=completed, total=total)
+            logger.info("[Job %s] %s", job_id, ref_ev["message"])
+            _update_job(job_id, current_chapter_id=chapter_id, message=ref_ev["message"])
             _publish(
                 job_id,
                 {
@@ -621,7 +677,7 @@ async def _run_translate(
                     "chapter_number": chapter["chapter_number"],
                     "completed_items": completed,
                     "total_items": total,
-                    "message": ref_msg,
+                    **ref_ev,
                 },
             )
             added = await _safe_update_reference(chapter_id, db_path)
@@ -634,16 +690,13 @@ async def _run_translate(
                         "chapter_number": chapter["chapter_number"],
                         "chapter_title": chapter["title"],
                         "added": added,
-                        "message": (
-                            f"Bab {label}: "
-                            f"{_describe_added(added)} baru ditemukan"
-                        ),
+                        **_msg("new_ref_found", lang, label=label, summary=_describe_added(added, lang)),
                     },
                 )
 
-        tl_msg = f"Menerjemahkan Bab {label}: {chapter['title']} ({completed}/{total})"
-        logger.info("[Job %s] %s", job_id, tl_msg)
-        _update_job(job_id, current_chapter_id=chapter_id, message=tl_msg)
+        tl_ev = _msg("translating_chapter", lang, label=label, title=chapter["title"], completed=completed, total=total)
+        logger.info("[Job %s] %s", job_id, tl_ev["message"])
+        _update_job(job_id, current_chapter_id=chapter_id, message=tl_ev["message"])
         with database.get_conn(db_path) as conn:
             conn.execute(
                 "UPDATE chapters SET status = 'translating', updated_at = ? WHERE id = ?",
@@ -658,22 +711,25 @@ async def _run_translate(
                 "chapter_title": chapter["title"],
                 "completed_items": completed,
                 "total_items": total,
-                "message": tl_msg,
+                **tl_ev,
             },
         )
 
         async def on_progress(payload: dict[str, Any], _chapter=chapter, _label=label) -> None:
             ptype = payload.get("type")
             if ptype == "title":
-                msg = f"Bab {_label} — menerjemahkan judul…"
+                ev = _msg("translating_title", lang, label=_label)
             else:
-                msg = (
-                    f"Bab {_label} — chunk "
-                    f"{payload.get('chunk_index')}/{payload.get('chunk_total')} "
-                    f"({payload.get('chunk_chars', 0)} kar)"
+                ev = _msg(
+                    "chunk_progress",
+                    lang,
+                    label=_label,
+                    index=payload.get("chunk_index"),
+                    total=payload.get("chunk_total"),
+                    chars=payload.get("chunk_chars", 0),
                 )
-            logger.info("[Job %s] %s", job_id, msg)
-            _update_job(job_id, message=msg)
+            logger.info("[Job %s] %s", job_id, ev["message"])
+            _update_job(job_id, message=ev["message"])
             _publish(
                 job_id,
                 {
@@ -682,7 +738,7 @@ async def _run_translate(
                     "chapter_title": _chapter["title"],
                     "completed_items": completed,
                     "total_items": total,
-                    "message": msg,
+                    **ev,
                 },
             )
 
@@ -701,20 +757,27 @@ async def _run_translate(
                     "type": "chapter_error",
                     "chapter_id": chapter_id,
                     "chapter_number": chapter["chapter_number"],
-                    "message": f"Bab {label} gagal: {exc}",
+                    **_msg("chapter_failed", lang, label=label, error=exc),
                 },
             )
             raise JobError(
-                f"Batch dihentikan di Bab {label} agar bab berikutnya tidak kehilangan konteks: {exc}"
+                f"Batch stopped at Chapter {label} so following chapters do not lose context: {exc}"
+                if lang == "en"
+                else f"Batch dihentikan di Bab {label} agar bab berikutnya tidak kehilangan konteks: {exc}"
             ) from exc
 
         completed += 1
-        done_msg = (
-            f"Bab {label} selesai ({completed}/{total}) — "
-            f"skor {result['quality']['score']} ({result['quality']['grade']})"
+        done_ev = _msg(
+            "chapter_done_score",
+            lang,
+            label=label,
+            completed=completed,
+            total=total,
+            score=result["quality"]["score"],
+            grade=result["quality"]["grade"],
         )
-        logger.info("[Job %s] %s", job_id, done_msg)
-        _update_job(job_id, completed_items=completed, message=done_msg)
+        logger.info("[Job %s] %s", job_id, done_ev["message"])
+        _update_job(job_id, completed_items=completed, message=done_ev["message"])
         _publish(
             job_id,
             {
@@ -728,7 +791,7 @@ async def _run_translate(
                 "chunks": result["chunks"],
                 "completed_items": completed,
                 "total_items": total,
-                "message": done_msg,
+                **done_ev,
             },
         )
 
@@ -739,7 +802,7 @@ async def _run_translate(
             job_id,
             {
                 "type": "warning",
-                "message": f"{len(failures)} bab gagal: {failures[0]}",
+                **_msg("failures_warning", lang, count=len(failures), first=failures[0]),
             },
         )
 
@@ -755,15 +818,25 @@ async def _run_apply_reference(
 ) -> None:
     """Apply updated reference/glossary settings to already-translated chapters in parallel."""
     job_id = state.job_id
+    lang = state.lang
     if not chapter_ids:
-        raise JobError("Tidak ada bab terjemahan untuk diperbarui")
+        raise JobError(
+            "No translated chapters to update"
+            if lang == "en"
+            else "Tidak ada bab terjemahan untuk diperbarui"
+        )
 
     total = len(chapter_ids)
-    init_msg = f"0/{total} bab (paralel {min(APPLY_REFERENCE_CONCURRENCY, total)}x)"
-    _update_job(job_id, total_items=total, message=init_msg)
+    init_ev = _msg(
+        "init_apply_ref",
+        lang,
+        total=total,
+        workers=min(APPLY_REFERENCE_CONCURRENCY, total),
+    )
+    _update_job(job_id, total_items=total, message=init_ev["message"])
     _publish(
         job_id,
-        {"type": "progress", "total_items": total, "completed_items": 0, "message": init_msg},
+        {"type": "progress", "total_items": total, "completed_items": 0, **init_ev},
     )
 
     completed = 0
@@ -787,8 +860,8 @@ async def _run_apply_reference(
             chapter = dict(row)
             label = _fmt_number(chapter["chapter_number"])
 
-            start_msg = f"Menyesuaikan bab {label}: {chapter['title'] or ''}".strip()
-            logger.info("[Job %s] %s", job_id, start_msg)
+            start_ev = _msg("aligning_chapter", lang, label=label, title=chapter["title"] or "")
+            logger.info("[Job %s] %s", job_id, start_ev["message"])
             _publish(
                 job_id,
                 {
@@ -798,7 +871,7 @@ async def _run_apply_reference(
                     "chapter_title": chapter["title"],
                     "completed_items": completed,
                     "total_items": total,
-                    "message": start_msg,
+                    **start_ev,
                 },
             )
 
@@ -813,9 +886,12 @@ async def _run_apply_reference(
                         "chapter_title": _chapter["title"],
                         "completed_items": completed,
                         "total_items": total,
-                        "message": (
-                            f"Bab {_label} — chunk "
-                            f"{payload.get('chunk_index')}/{payload.get('chunk_total')}"
+                        **_msg(
+                            "chunk_short",
+                            lang,
+                            label=_label,
+                            index=payload.get("chunk_index"),
+                            total=payload.get("chunk_total"),
                         ),
                     },
                 )
@@ -831,18 +907,27 @@ async def _run_apply_reference(
                         "type": "chapter_error",
                         "chapter_id": chapter_id,
                         "chapter_number": chapter["chapter_number"],
-                        "message": f"Bab {label} gagal disesuaikan: {exc}",
+                        **_msg("align_failed", lang, label=label, error=exc),
                     },
                 )
-                raise JobError(f"Penyesuaian berhenti di Bab {label}: {exc}") from exc
+                raise JobError(
+                    f"Alignment stopped at Chapter {label}: {exc}"
+                    if lang == "en"
+                    else f"Penyesuaian berhenti di Bab {label}: {exc}"
+                ) from exc
 
             completed += 1
-            done_msg = (
-                f"Bab {label} diperbarui ({completed}/{total}) — skor {result['quality']['score']} "
-                f"({result['quality']['grade']})"
+            done_ev = _msg(
+                "chapter_aligned_score",
+                lang,
+                label=label,
+                completed=completed,
+                total=total,
+                score=result["quality"]["score"],
+                grade=result["quality"]["grade"],
             )
-            logger.info("[Job %s] %s", job_id, done_msg)
-            _update_job(job_id, completed_items=completed, message=done_msg)
+            logger.info("[Job %s] %s", job_id, done_ev["message"])
+            _update_job(job_id, completed_items=completed, message=done_ev["message"])
             _publish(
                 job_id,
                 {
@@ -856,7 +941,7 @@ async def _run_apply_reference(
                     "chunks": result["chunks"],
                     "completed_items": completed,
                     "total_items": total,
-                    "message": done_msg,
+                    **done_ev,
                 },
             )
 

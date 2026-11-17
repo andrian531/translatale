@@ -349,4 +349,17 @@ def test_describe_added_formats_message():
     assert _describe_added({"characters_added": 2, "locations_added": 0, "terms_added": 1}) == (
         "+2 karakter, +1 istilah"
     )
+    assert (
+        _describe_added({"characters_added": 2, "locations_added": 0, "terms_added": 1}, lang="en")
+        == "+2 characters, +1 terms"
+    )
     assert _describe_added({"characters_added": 0, "locations_added": 0, "terms_added": 0}) == ""
+
+
+def test_ui_lang_middleware_formats_job_messages(client):
+    from core.i18n import tr
+
+    assert tr("starting", "en") == "Starting…"
+    assert tr("starting", "id") == "Memulai…"
+    assert tr("completed", "en") == "Completed"
+    assert tr("completed", "id") == "Selesai"
